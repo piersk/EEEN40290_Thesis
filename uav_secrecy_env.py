@@ -102,15 +102,16 @@ class UAVSecrecyEnv(gym.Env):
         self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(self.num_uavs * 3,), dtype=np.float32)
 
         # Constraints
-        self.P_MAX = 30     # 30W maximum wattage  
-        self.E_MAX = 1000   # 1kJ maximum energy 
+        self.P_MAX = 30     # 30W maximum wattage
+        self.E_MAX = 1000   # 1kJ maximum energy
         self.R_MIN = 0.75   # Minimum secrecy key rate exchange
-        self.xmin = 10      # 10m minimum altitude
+        self.V_MAX = 20     # Maximum UAV Velocity of 20 m/s
+        self.xmin = 0       # 0m minimum range
         self.ymin = 0       # 0m minimum range
-        self.zmin = 0       # 0m minimum range
-        self.xmax = 122     # 122m maximum altitude
+        self.zmin = 10      # 10m minimum altitude
+        self.xmax = 1500    # 15km radial range (diameter from any UAV position maximum range is 30km)
         self.ymax = 1500    # 15km radial range (diameter from any UAV position maximum range is 30km)
-        self.zmax = 1500    # 15km radial range (diameter from any UAV position maximum range is 30km)
+        self.zmax = 122     # 122m maximum altitude
 
         # Penalty weights
         # Equally-weighted penalty values for now
@@ -119,6 +120,7 @@ class UAVSecrecyEnv(gym.Env):
         self.range_penalty = 10
         self.min_rate_penalty = 10
         self.energy_penalty = 10
+        self.velocity_penalty = 10
 
 
     def reset(self):
@@ -156,6 +158,8 @@ class UAVSecrecyEnv(gym.Env):
             penalty += self.min_rate_penalty
         elif violations["energy"]:
             penalty += self.energy_penalty
+        elif violations["velocity"]:
+            penalty += self.velocity_penalty
 
         reward -= penalty
 
@@ -200,6 +204,7 @@ class UAVSecrecyEnv(gym.Env):
             "range": False,
             "min_rate": False,
             "energy": False,
+            "velocity": False
         }
 
         # Power constraint
@@ -219,6 +224,9 @@ class UAVSecrecyEnv(gym.Env):
                 violations["energy"] = True
             if uav.energy >= self.E_MAX:
                 violations["energy"] = True
+
+            if uav.velocity >= self.V_MAX:
+                violations["velocity"] = True
 
         # Minimum rate per GU (placeholder — later use actual SINR)
         for gu in self.gus:
