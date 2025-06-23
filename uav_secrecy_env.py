@@ -31,11 +31,11 @@ class UAV:
         diff = self.history[-1] - self.history[-2]
         return np.linalg.norm(diff)
 
-    def compute_energy_consumption(self, g=9.81, k=1.5, z=4, rho=1.225, theta=0.3, Lambda=5, num_uavs, uav_mass):
+    def compute_energy_consumption(self, g=9.81, k=1.5, z=4, rho=1.225, theta=0.3, Lambda=5, num_uavs, mass):
         c_t = self.get_distance_travelled()
         # n_sum denotes the mass of the UAV frame & battery
         for i in range(num_uavs):
-            n_sum += uav_mass
+            n_sum += mass
         term1 = (n_sum * g * c_t) / (k * z)                         # Travelling Energy Consumption
         term2 = ((n_sum * g) ** 1.5) / np.sqrt(2 * z * rho * theta) # Hovering Energy Consumption
         term3 = Lambda * c_t / (self.velocity + 1e-6)               # Avionics Energy Consumption
