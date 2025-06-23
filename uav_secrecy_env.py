@@ -227,9 +227,9 @@ class UAVSecrecyEnv(gym.Env):
         # Altitude & range constraints
         for uav in self.uavs:
             x, y, h = uav.position
-            if not (self.xmin <= x <= self.xmax and self.ymin <= y <= self.ymax and self.Hmin <= h <= self.Hmax):
+            if not (self.xmin <= x <= self.xmax and self.ymin <= y <= self.ymax):
                 violations["range"] = True
-            if not (self.Hmin <= h <= self.Hmax):
+            if not (self.zmin <= h <= self.zmax):
                 violations["altitude"] = True
 
             if uav.energy <= 0:
@@ -267,4 +267,6 @@ class UAVSecrecyEnv(gym.Env):
         return pdf
 
     def render(self, mode='human'):
+        # TODO: Visualise the UAV & GU Clustering in 3-D Space
+        # Possibly create a separate function for plotting convergence of the parameters to their optimal values over episodes
         pass  # Add matplotlib plot if desired
