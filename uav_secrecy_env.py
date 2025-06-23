@@ -68,7 +68,7 @@ class UAVBaseStation(UAV):
     def assign_gu(self, gu):
         self.ground_users.append(gu)
 
-
+# === Ground User Class ===
 class GroundUser:
     def __init__(self, gu_id, position, cluster_id):
         self.id = gu_id
@@ -173,16 +173,28 @@ class UAVSecrecyEnv(gym.Env):
         energy_efficiency_arr = []
         masr = self.sum_rate
         reward = 0
+        energy_eff_reward = 0
         for gu in self.gus:
             d = np.linalg.norm(bs.position - gu.position)
             if d < bs.coverage_radius:
                 reward += 1.0 / (1 + d)
+        i = 0
         for uav in self.uavs:
             # TODO: Compare previous energy efficiency calculations with current one
             # If there's an increase in energy efficiency (i.e., a decrease in energy consumption),
-            # then increase the reward factor. Otherwise, the DRL algorithm should increase the penalty
+            # then increase the reward factor. 
             energy_efficiency = self.sum_rate / compute_energy_consumption()
             energy_efficiency_arr.append(energy_efficiency) 
+            i += 1
+            if i > 1:
+                if (energy_efficiency_arr[i] >= energy_efficiency_arr[i-1]):
+                    reward += energy_eff_reward
+                else:
+                    continue
+            else:
+                continue
+
+            # TODO: Increase reward for increase in the maximum of the minimum average secrecy rate
 
         return reward
 
