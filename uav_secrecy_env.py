@@ -7,7 +7,7 @@ from gymnasium import spaces
 # === Base UAV Class ===
 class UAV:
     # TODO: ADD MAXIMUM ENERGY CONSUMPTION, TRANSMIT POWER CONSUMPTION VALUES, ETC.
-    def __init__(self, uav_id, position, velocity, tx_power, energy, links):
+    def __init__(self, uav_id, position, velocity, tx_power, energy, links, mass):
         # UAV Characteristics & Parameters
         self.id = uav_id
         self.position = np.array(position, dtype=np.float32)
@@ -17,6 +17,8 @@ class UAV:
         self.history = [self.position.copy()]
         # TODO: ADD COMMUNICATION LINKS TO/FROM THE UAV
         self.links = np.array(len(links))
+        # TODO: POSSIBLE NEED TO SPLIT UP UAV FRAME & BATTERY MASS VALUES FOR n_sum IN FUTURE
+        self.mass = mass
 
     def move(self, delta_pos):
         self.position += delta_pos
@@ -29,15 +31,17 @@ class UAV:
         diff = self.history[-1] - self.history[-2]
         return np.linalg.norm(diff)
 
-    def compute_energy_consumption(self, g=9.81, k=1.5, z=4, rho=1.225, theta=0.3, Lambda=5):
+    def compute_energy_consumption(self, g=9.81, k=1.5, z=4, rho=1.225, theta=0.3, Lambda=5, num_uavs, uav_mass):
         c_t = self.get_distance_travelled()
-        n_sum = 2  # framework + battery
-        term1 = (n_sum * g * c_t) / (k * z)
-        term2 = ((n_sum * g) ** 1.5) / np.sqrt(2 * z * rho * theta)
-        term3 = Lambda * c_t / (self.velocity + 1e-6)
+        # n_sum denotes the mass of the UAV frame & battery
+        for i in range(num_uavs):
+            n_sum += uav_mass
+        term1 = (n_sum * g * c_t) / (k * z)                         # Travelling Energy Consumption
+        term2 = ((n_sum * g) ** 1.5) / np.sqrt(2 * z * rho * theta) # Hovering Energy Consumption
+        term3 = Lambda * c_t / (self.velocity + 1e-6)               # Avionics Energy Consumption
         # Comms power use (Tx power * placeholder sum rate)
         R_kn = 1.0  # Placeholder sum rate per GU served
-        term4 = self.tx_power * R_kn
+        term4 = self.tx_power * R_kn                                # Communication Energy Consumption
         return term1 + term2 + term3 + term4
 
 
@@ -227,6 +231,7 @@ class UAVSecrecyEnv(gym.Env):
 
     # Compute K-factor using varying dominant LoS & non-dominant LoS signals
     # TODO: Make a separate function fo computing the PDF for the Rician channel model from this function
+    # USE LoS FUNCTION FOR VALUES PASSED TO THIS FUNCTION (dominant & non-dominant signal power)
     def rician_fading(self, tx, rx, v, sigma):
         d = np.linalg.norm(tx - rx)
         K = (v**2) / (2*(sigma**2))
