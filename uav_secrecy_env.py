@@ -16,7 +16,7 @@ class UAV:
         self.energy = energy
         self.history = [self.position.copy()]
         # TODO: ADD COMMUNICATION LINKS TO/FROM THE UAV
-        self.links = np.array(len(links))
+        self.links = np.array(links)
         # TODO: POSSIBLE NEED TO SPLIT UP UAV FRAME & BATTERY MASS VALUES FOR n_sum IN FUTURE
         self.mass = mass
 
@@ -31,13 +31,15 @@ class UAV:
         diff = self.history[-1] - self.history[-2]
         return np.linalg.norm(diff)
 
-    def compute_energy_consumption(self, g=9.81, k=1.5, z=4, rho=1.225, theta=0.3, Lambda=5, num_uavs, mass):
+    # TODO: Try different numbers of rotors (4 & 8)
+    # NB: Lift-to-Drag ratio k based on rough calculations and can be adjusted if needs be
+    def compute_energy_consumption(self, g=9.81, k=6.65, num_rotors=4, rho=1.225, theta=0.3, Lambda=5, num_uavs=3, mass=2000):
         c_t = self.get_distance_travelled()
         # n_sum denotes the mass of the UAV frame & battery
         for i in range(num_uavs):
             n_sum += mass
-        term1 = (n_sum * g * c_t) / (k * z)                         # Travelling Energy Consumption
-        term2 = ((n_sum * g) ** 1.5) / np.sqrt(2 * z * rho * theta) # Hovering Energy Consumption
+        term1 = (n_sum * g * c_t) / (k * num_rotors)                         # Travelling Energy Consumption
+        term2 = ((n_sum * g) ** 1.5) / np.sqrt(2 * num_rotors * rho * theta) # Hovering Energy Consumption
         term3 = Lambda * c_t / (self.velocity + 1e-6)               # Avionics Energy Consumption
         # Comms power use (Tx power * placeholder sum rate)
         R_kn = 1.0  # Placeholder sum rate per GU served
@@ -88,8 +90,8 @@ class UAVSecrecyEnv(gym.Env):
 
         # TODO: ADD MORE UAVS HERE FOR DIFFERENT SCENARIOS
         self.uavs = [
-            UAVBaseStation(0, [0, 0, 100], 0, 10, 1000),
-            UAVRelay(1, [50, 50, 100], 0, 10, 1000),
+            UAVBaseStation(0, [0, 0, 100], 0, 10, 1000, 5, 2000),
+            UAVRelay(1, [50, 50, 100], 0, 10, 1000, 2, 2000),
             UAVJammer(2, [100, 100, 100], 0, 10, 1000, noise_power=2.0)
         ]
 
@@ -147,7 +149,6 @@ class UAVSecrecyEnv(gym.Env):
         violations = self.check_constraints()
         penalty = 0
         # TODO: DETERMINE WHAT SCORES SHOULD BE USED FOR PARTICULAR PENALTIES
-        # DETERMINE WHICH PENALTIES SHOULD BE APPLIED IN EACH FUNCTION
         if violations["power"]:
             penalty += self.pwr_penalty
         elif violations["altitude"]:
@@ -224,23 +225,26 @@ class UAVSecrecyEnv(gym.Env):
         if total_tx_power > self.P_MAX:
             violations["power"] = True
 
-        # Altitude & range constraints
         for uav in self.uavs:
+            # Altitude & range constraints
             x, y, h = uav.position
             if not (self.xmin <= x <= self.xmax and self.ymin <= y <= self.ymax):
                 violations["range"] = True
             if not (self.zmin <= h <= self.zmax):
                 violations["altitude"] = True
 
+            # Energy consumption constraints
             if uav.energy <= 0:
                 violations["energy"] = True
             if uav.energy >= self.E_MAX:
                 violations["energy"] = True
 
+            # UAV Velocity Constraint 
             if uav.velocity >= self.V_MAX:
                 violations["velocity"] = True
 
         # Minimum rate per GU (placeholder — later use actual SINR)
+        # TODO: FIX THIS FUNCTION AS IT'S INCORRECT
         for gu in self.gus:
             if gu.channel_gain < self.R_min:
                 violations["min_rate"] = True
