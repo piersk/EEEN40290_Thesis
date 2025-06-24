@@ -19,6 +19,8 @@ class UAV:
         self.links = np.array(links)
         # TODO: POSSIBLE NEED TO SPLIT UP UAV FRAME & BATTERY MASS VALUES FOR n_sum IN FUTURE
         self.mass = mass
+        # TODO: ADD SUM RATE PARAMETER
+        # self.sum_rate = sum_rate
 
     def move(self, delta_pos):
         self.position += delta_pos
@@ -36,6 +38,7 @@ class UAV:
     def compute_energy_consumption(self, g=9.81, k=6.65, num_rotors=4, rho=1.225, theta=0.3, Lambda=5, num_uavs=3, mass=2000):
         c_t = self.get_distance_travelled()
         # n_sum denotes the mass of the UAV frame & battery
+        n_sum = 0
         for i in range(num_uavs):
             n_sum += mass
         term1 = (n_sum * g * c_t) / (k * num_rotors)                         # Travelling Energy Consumption
@@ -88,21 +91,6 @@ class UAVSecrecyEnv(gym.Env):
         self.num_uavs = 3
         self.num_gus = 5
 
-        # TODO: ADD MORE UAVS HERE FOR DIFFERENT SCENARIOS
-        self.uavs = [
-            UAVBaseStation(0, [0, 0, 100], 0, 10, 1000, 5, 2000),
-            UAVRelay(1, [50, 50, 100], 0, 10, 1000, 2, 2000),
-            UAVJammer(2, [100, 100, 100], 0, 10, 1000, noise_power=2.0)
-        ]
-
-        # Number of Randomly Distributed GUs
-        #self.gus = [GroundUser(i, [np.random.uniform(0, 200), np.random.uniform(0, 200)], 0) for i in range(self.num_gus)]
-        self.gus = [GroundUser(i, [np.random.uniform(self.xmin, self.xmax), np.random.uniform(self.ymin, self.ymax)], 0) for i in range(self.num_gus)]
-
-        # Observation: concatenated UAV positions
-        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(self.num_uavs * 3,), dtype=np.float32)
-        self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(self.num_uavs * 3,), dtype=np.float32)
-
         # Constraints
         self.P_MAX = 30     # 30W maximum wattage
         self.E_MAX = 1000   # 1kJ maximum energy
@@ -124,13 +112,33 @@ class UAVSecrecyEnv(gym.Env):
         self.energy_penalty = 10
         self.velocity_penalty = 10
 
+        # TODO: ADD MORE UAVS HERE FOR DIFFERENT SCENARIOS
+        self.uavs = [
+            UAVBaseStation(0, [0, 0, 100], 0, 10, 1000, 5, 2000),
+            UAVRelay(1, [50, 50, 100], 0, 10, 1000, 2, 2000),
+            UAVJammer(2, [100, 100, 100], 0, 10, 1000, 5, 2000, noise_power=2.0)
+        ]
 
-    def reset(self):
+        # Number of Randomly Distributed GUs
+        #self.gus = [GroundUser(i, [np.random.uniform(0, 200), np.random.uniform(0, 200)], 0) for i in range(self.num_gus)]
+        self.gus = [GroundUser(i, [np.random.uniform(self.xmin, self.xmax), np.random.uniform(self.ymin, self.ymax)], 0) for i in range(self.num_gus)]
+
+        # Observation: concatenated UAV positions
+        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(self.num_uavs * 3,), dtype=np.float32)
+        self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(self.num_uavs * 3,), dtype=np.float32)
+
+    def reset(self, *, seed=None, options=None):
+        super().reset(seed=seed)
+
+        if seed is not None:
+            np.random.seed(seed)
+
         for i, uav in enumerate(self.uavs):
             uav.position = np.random.uniform(0, 200, size=(3,))
             uav.energy = 1000
             uav.history = [uav.position.copy()]
-        return self._get_obs()
+
+        return self._get_obs(), {}
 
     def _get_obs(self):
         return np.concatenate([uav.position for uav in self.uavs]).astype(np.float32)
