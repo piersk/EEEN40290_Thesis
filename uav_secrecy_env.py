@@ -35,18 +35,19 @@ class UAV:
 
     # TODO: Try different numbers of rotors (4 & 8)
     # NB: Lift-to-Drag ratio k based on rough calculations and can be adjusted if needs be
+    # Ideally, it'd be better to compute the L/D ratio in another helper function but for now, use the default "by hand" calculated value
     def compute_energy_consumption(self, g=9.81, k=6.65, num_rotors=4, rho=1.225, theta=0.3, Lambda=5, num_uavs=3, mass=2000):
         c_t = self.get_distance_travelled()
         # n_sum denotes the mass of the UAV frame & battery
         n_sum = 0
         for i in range(num_uavs):
             n_sum += mass
-        term1 = (n_sum * g * c_t) / (k * num_rotors)                         # Travelling Energy Consumption
-        term2 = ((n_sum * g) ** 1.5) / np.sqrt(2 * num_rotors * rho * theta) # Hovering Energy Consumption
-        term3 = Lambda * c_t / (self.velocity + 1e-6)               # Avionics Energy Consumption
+        term1 = (n_sum * g * c_t) / (k * num_rotors)                            # Travelling Energy Consumption
+        term2 = ((n_sum * g) ** 1.5) / np.sqrt(2 * num_rotors * rho * theta)    # Hovering Energy Consumption
+        term3 = Lambda * c_t / (self.velocity + 1e-6)                           # Avionics Energy Consumption
         # Comms power use (Tx power * placeholder sum rate)
         R_kn = 1.0  # Placeholder sum rate per GU served
-        term4 = self.tx_power * R_kn                                # Communication Energy Consumption
+        term4 = self.tx_power * R_kn                                            # Communication Energy Consumption
         return term1 + term2 + term3 + term4
 
 
@@ -81,6 +82,15 @@ class GroundUser:
         self.cluster_id = cluster_id
         self.subchannel = None
         self.channel_gain = 1.0  # Placeholder
+
+class LegitGU(GroundUser):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # TODO: Maybe add "is_assigned" binary variable here
+
+class EveGU(GroundUser):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
 
 
 # === Custom Gym Environment ===
@@ -121,7 +131,7 @@ class UAVSecrecyEnv(gym.Env):
 
         # Number of Randomly Distributed GUs
         #self.gus = [GroundUser(i, [np.random.uniform(0, 200), np.random.uniform(0, 200)], 0) for i in range(self.num_gus)]
-        self.gus = [GroundUser(i, [np.random.uniform(self.xmin, self.xmax), np.random.uniform(self.ymin, self.ymax)], 0) for i in range(self.num_gus)]
+        self.gus = [GroundUser(i, [np.random.uniform(self.xmin, self.xmax), np.random.uniform(self.ymin, self.ymax), 0], 0) for i in range(self.num_gus)]
 
         # Observation: concatenated UAV positions
         self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(self.num_uavs * 3,), dtype=np.float32)
@@ -174,25 +184,63 @@ class UAVSecrecyEnv(gym.Env):
 
         return self._get_obs(), reward, done, {}
 
+    # TODO: WORK OUT HOW TO DO THIS
+    def subcarrier_scheduling(self):
+        #psuedocode/template
+        if scheduled:
+            alpha = 1 
+        else:
+            alpha = 0
+
+        return self._get_obs(), alpha
+
+    # TODO: COMPUTE AWGN
+    def compute_awgn():
+        awgn = 0
+
+        return awgn
+
+    # TODO: Get tx_power & noise_power from UAV channel model & AWGN model, respectively
+    def compute_snr(self, noise):
+        noise_power = noise**2
+        snr = 10 * np.log10(self.tx_power / noise_power)
+        return snr
+
+    # TODO: COMPUTE MASR
+    # Compute R_sec for UAV-GU comms based on Zhang et. al (2024) model
+    # Compute worst-case R_sec value and find MASR by subtracting this from calculated R_sec
+    # R_sec = alpha * ln(1+SINR) [could also use SNR/SINAD if it's better suited to the environment]
+    def compute_masr(self, subcarr_sched_var, snr):
+        masr = subcarr_sched_var * np.log2(1 + snr)
+        return masr
+
     def _compute_reward(self):
         # Example: sum of distances to GUs from UAVBaseStation
         # TODO: ADD OTHER REWARD PARAMETERS FOR FINDING MORE OPTIMAL PARAMETERS
         # Must factor in power, secrecy, energy efficiency, etc.
         bs = self.uavs[0]
         energy_efficiency_arr = []
-        masr = self.sum_rate
+        #masr = self.sum_rate
+
+        # TODO: CALL MASR FUNCTION HERE FOR REWARD COMPUTATION
+        noise = compute_awgn()
+        snr = compute_snr(noise)
+        # TODO: DETERMINE DECISION FOR SUBCARRIER SCHEDULING VARIABLE ALPHA FOR MASR CALCULATION
+        masr = self.compute_masr()
+
         reward = 0
         energy_eff_reward = 0
         for gu in self.gus:
             d = np.linalg.norm(bs.position - gu.position)
             if d < bs.coverage_radius:
                 reward += 1.0 / (1 + d)
+
         i = 0
         for uav in self.uavs:
             # TODO: Compare previous energy efficiency calculations with current one
             # If there's an increase in energy efficiency (i.e., a decrease in energy consumption),
             # then increase the reward factor. 
-            energy_efficiency = self.sum_rate / compute_energy_consumption()
+            energy_efficiency = masr / compute_energy_consumption()
             energy_efficiency_arr.append(energy_efficiency) 
             i += 1
             if i > 1:
