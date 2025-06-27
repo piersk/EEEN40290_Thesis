@@ -121,6 +121,7 @@ class UAVSecrecyEnv(gym.Env):
         }
 
         # === Spaces ===
+        # TODO: POSSIBLE CHANGES REQUIRED FOR THE STATE SPACE DIMENSIONS/SHAPES
         self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(self.num_uavs * 3,), dtype=np.float32)
         self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(self.num_uavs * 3,), dtype=np.float32)
 
