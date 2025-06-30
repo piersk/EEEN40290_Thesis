@@ -27,7 +27,7 @@ class Eavesdropper(GroundUser):
 
 # === UAV Base Classes ===
 class UAV:
-    def __init__(self, uav_id, position, velocity, tx_power, energy, num_links, links, mass):
+    def __init__(self, uav_id, position, velocity, tx_power, energy, num_links, mass):
         self.id = uav_id
         self.position = np.array(position, dtype=np.float32)
         self.velocity = velocity
@@ -35,7 +35,7 @@ class UAV:
         self.energy = energy
         self.history = [self.position.copy()]
         self.num_links = num_links  # Changed from links to num_links
-        self.links = np.array(num_links)
+        #self.links = np.array(num_links)
         self.mass = mass
         self.prev_energy_consumption = 0    # Previous energy consumption initialised to 0 J
         self.prev_tx_power = 0
@@ -211,7 +211,7 @@ class UAVSecrecyEnv(gym.Env):
         # TODO: INCLUDE CODE TO CLOSE DISTANCE ON UAV-BS AND GUs 
         for gu in self.legit_users:
             d = np.linalg.norm(bs.position - gu.position)
-            if d <= bs.history(-1):
+            if d <= np.linalg.norm(bs.history[-1]):
                 reward += 5
 
             if d < bs.coverage_radius:
