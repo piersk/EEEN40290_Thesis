@@ -1,4 +1,4 @@
-# uav_secrecy_env.py
+# uav_bs_env.py
 from rician_channel import rician_fading_params, rician_channel_gain
 import numpy as np
 import gymnasium as gym
@@ -24,7 +24,9 @@ class Eavesdropper(GroundUser):
         super().__init__(gu_id, position, cluster_id=-1)
         self.snr_intercept = 0.0
 
-
+# TODO: Add awareness of GUs to UAV-BS class
+# Add links that can be updated on every timestep 
+# Adjust rewards/penalties to reward proper clustering. In the case of a single UAV-BS, this means ensuring it's centred in between a set of GUs
 # === UAV Base Classes ===
 class UAV:
     def __init__(self, uav_id, position, velocity, tx_power, energy, num_links, mass):
@@ -62,6 +64,10 @@ class UAV:
         energy_cons = term1 + term2 + term3 + term4
         return energy_cons
 
+    def form_link(self):
+        links = []
+        return links
+
 class UAVBaseStation(UAV):
     def __init__(self, *args, coverage_radius=200, **kwargs):
         super().__init__(*args, **kwargs)
@@ -86,7 +92,7 @@ class UAVSecrecyEnv(gym.Env):
         super().__init__()
         self.num_uavs = 1
         self.num_legit_users = 5
-        self.num_eavesdroppers = 3
+        self.num_eavesdroppers = 1
 
         # === Constraints ===
         # TODO: Separate total & maximum per step constraints to ensure adequate mission time is reached 
@@ -129,6 +135,7 @@ class UAVSecrecyEnv(gym.Env):
         # TODO: POSSIBLE CHANGES REQUIRED FOR THE STATE SPACE DIMENSIONS/SHAPES
         self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(self.num_uavs * 3,), dtype=np.float32)
         self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(self.num_uavs * 3,), dtype=np.float32)
+        #self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(5), dtype=np.float32)
 
     def reset(self, *, seed=None, options=None):
         super().reset(seed=seed)
@@ -159,7 +166,7 @@ class UAVSecrecyEnv(gym.Env):
         action = np.clip(action, -1, 1)
         energy_cons_penalty = 0
         for i, uav in enumerate(self.uavs):
-            delta = action[i*3:(i+1)*3] * 5.0
+            delta = action[i*3:(i+1)*3] * 30.0
             uav.move(delta)
             uav_energy_cons = uav.compute_energy_consumption()
             uav.energy -= uav_energy_cons
@@ -179,6 +186,41 @@ class UAVSecrecyEnv(gym.Env):
         reward -= (total_penalty + energy_cons_penalty)
         return self._get_obs(), reward, done, False, {}
 
+    def _compute_reward(self):
+        bs = self.uavs[0]
+        reward = 0
+        noise = self.compute_awgn()
+        snr_legit = self.compute_snr(bs.tx_power, noise)
+        masr_total = 0
+        num_served_users = 0
+
+        # === Move closer to centroid of GUs ===
+        gu_positions = np.array([gu.position for gu in self.legit_users])
+        centroid = np.mean(gu_positions, axis=0)
+        distance_to_centroid = np.linalg.norm(bs.position - centroid)
+        reward += 20 * (1.0 / (1.0 + distance_to_centroid))  # closer → higher reward
+
+        # === Minimize energy consumption ===
+        energy_consumption = bs.compute_energy_consumption()
+        bs.prev_energy_consumption = energy_consumption  # update tracking
+        energy_efficiency = 1.0 / (1.0 + energy_consumption)
+        reward += 15 * energy_efficiency
+
+        # === Serve legitimate users ===
+        for gu in self.legit_users:
+            d = np.linalg.norm(bs.position - gu.position)
+            if d < bs.coverage_radius:
+                snr_eaves = max(self.compute_snr(bs.tx_power, noise) for eve in self.eavesdroppers)
+                masr = self.compute_masr(alpha=1, snr_legit=snr_legit, snr_eaves=snr_eaves)
+                reward += 10 * masr
+                masr_total += masr
+                num_served_users += 1
+
+        # === Encourage serving more GUs ===
+        reward += 5 * num_served_users
+
+        return reward
+    '''
     def _compute_reward(self):
         bs = self.uavs[0]
         reward = 0
@@ -225,6 +267,7 @@ class UAVSecrecyEnv(gym.Env):
         uav.prev_velocity = prev_velocity
 
         return reward
+    '''
 
     def check_constraints(self):
         violations = {
