@@ -36,7 +36,9 @@ class UAV:
         self.history = [self.position.copy()]
         self.num_links = num_links  # Changed from links to num_links
         self.mass = mass
-        self.prev_energy_consumption = 0
+        self.prev_energy_consumption = 0    # Previous energy consumption initialised to 0 J
+        self.prev_tx_power = 0
+        self.prev_velocity = 0
 
     def move(self, delta_pos):
         self.position += delta_pos
@@ -83,11 +85,12 @@ class UAVSecrecyEnv(gym.Env):
         self.num_eavesdroppers = 3
 
         # === Constraints ===
-        self.P_MAX = 30
-        self.E_MAX = 1000
-        self.R_MIN = 0.75
-        self.V_MAX = 20
-        self.xmin, self.ymin, self.zmin = 0, 0, 10
+        # TODO: Separate total & maximum per step constraints to ensure adequate mission time is reached 
+        self.P_MAX = 30     # 30 W
+        self.E_MAX = 1000   # 1 kJ 
+        self.R_MIN = 0.75   # 0.75 Minimum MASR
+        self.V_MAX = 30     # 30 m/s
+        self.xmin, self.ymin, self.zmin = 0, 0, 10 
         self.xmax, self.ymax, self.zmax = 1500, 1500, 122
         self.pwr_penalty = self.alt_penalty = self.range_penalty = \
         self.min_rate_penalty = self.energy_penalty = self.velocity_penalty = 10
@@ -136,12 +139,15 @@ class UAVSecrecyEnv(gym.Env):
     def _get_obs(self):
         return np.concatenate([uav.position for uav in self.uavs]).astype(np.float32)
 
+    # Normalised AWGN calculation
     def compute_awgn(self):
         return np.random.normal(0, 1)
 
     def compute_snr(self, tx_power, noise_power):
         return 10 * np.log10(tx_power / (noise_power**2 + 1e-9))
 
+    # Minimum Average Secrecy Rate Calculation 
+    # Takes UAV parameters, subcarrier scheduling decision variable, SNR of legitimate GU & UAV-BS channel, SNR of eavesdroppers' channels
     def compute_masr(self, alpha, snr_legit, snr_eaves):
         R_legit = alpha * np.log2(1 + snr_legit)
         R_eaves = np.log2(1 + snr_eaves)
@@ -198,12 +204,15 @@ class UAVSecrecyEnv(gym.Env):
         for gu in self.legit_users:
             d = np.linalg.norm(bs.position - gu.position)
 
+        # TODO: INCLUDE CODE TO CLOSE DISTANCE ON UAV-BS AND GUs 
         for gu in self.legit_users:
             d = np.linalg.norm(bs.position - gu.position)
+
             if d < bs.coverage_radius:
                 snr_eaves = max(self.compute_snr(bs.tx_power, noise) for eve in self.eavesdroppers)
                 masr = self.compute_masr(alpha=1, snr_legit=snr_legit, snr_eaves=snr_eaves)
                 reward += 10 * masr
+
 
         prev = energy_consumption
         uav.prev_energy_consumption = prev
