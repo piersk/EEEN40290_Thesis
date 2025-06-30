@@ -27,7 +27,7 @@ class Eavesdropper(GroundUser):
 
 # === UAV Base Classes ===
 class UAV:
-    def __init__(self, uav_id, position, velocity, tx_power, energy, num_links, mass):
+    def __init__(self, uav_id, position, velocity, tx_power, energy, num_links, links, mass):
         self.id = uav_id
         self.position = np.array(position, dtype=np.float32)
         self.velocity = velocity
@@ -35,6 +35,7 @@ class UAV:
         self.energy = energy
         self.history = [self.position.copy()]
         self.num_links = num_links  # Changed from links to num_links
+        self.links = np.array(num_links)
         self.mass = mass
         self.prev_energy_consumption = 0    # Previous energy consumption initialised to 0 J
         self.prev_tx_power = 0
@@ -50,7 +51,7 @@ class UAV:
             return 0
         return np.linalg.norm(self.history[-1] - self.history[-2])
 
-    def compute_energy_consumption(self, g=9.81, k=6.65, num_rotors=4, rho=1.225, theta=0.3, Lambda=5):
+    def compute_energy_consumption(self, g=9.81, k=6.65, num_rotors=4, rho=1.225, theta=0.3, Lambda=0.15):
         c_t = self.get_distance_travelled()
         n_sum = self.mass
         term1 = (n_sum * g * c_t) / (k * num_rotors)
@@ -58,7 +59,8 @@ class UAV:
         term3 = Lambda * c_t / (self.velocity + 1e-6)
         R_kn = 1.0
         term4 = self.tx_power * R_kn
-        return term1 + term2 + term3 + term4
+        energy_cons = term1 + term2 + term3 + term4
+        return energy_cons
 
 class UAVBaseStation(UAV):
     def __init__(self, *args, coverage_radius=200, **kwargs):
@@ -66,10 +68,12 @@ class UAVBaseStation(UAV):
         self.coverage_radius = coverage_radius
         self.legitimate_users = []
 
+# TODO: Include relayed links between UAVs as a list
 class UAVRelay(UAV):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
+# TODO: Include eavesdropping GUs being interfered with as a list
 class UAVJammer(UAV):
     def __init__(self, *args, noise_power=1.0, **kwargs):
         super().__init__(*args, **kwargs)
@@ -207,6 +211,8 @@ class UAVSecrecyEnv(gym.Env):
         # TODO: INCLUDE CODE TO CLOSE DISTANCE ON UAV-BS AND GUs 
         for gu in self.legit_users:
             d = np.linalg.norm(bs.position - gu.position)
+            if d <= bs.history(-1):
+                reward += 5
 
             if d < bs.coverage_radius:
                 snr_eaves = max(self.compute_snr(bs.tx_power, noise) for eve in self.eavesdroppers)
@@ -214,8 +220,11 @@ class UAVSecrecyEnv(gym.Env):
                 reward += 10 * masr
 
 
-        prev = energy_consumption
-        uav.prev_energy_consumption = prev
+        prev_e_cons = energy_consumption
+        uav.prev_energy_consumption = prev_e_cons
+
+        prev_velocity = uav.velocity
+        uav.prev_velocity = prev_velocity
 
         return reward
 
