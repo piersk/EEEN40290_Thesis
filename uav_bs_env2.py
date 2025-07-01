@@ -153,7 +153,6 @@ class UAVSecrecyEnv(gym.Env):
         return self._get_obs(), reward, done, False, {}
 
 
-    '''
     def _compute_reward(self):
         bs = self.uavs[0]
         reward = 0
@@ -165,7 +164,7 @@ class UAVSecrecyEnv(gym.Env):
         distance_to_centroid = np.linalg.norm(bs.position - centroid)
 
         # === Reward closeness to GU cluster centroid ===
-        distance_reward = np.exp(-0.01 * distance_to_centroid)  # [0,1], sharper falloff
+        distance_reward = np.exp(-0.01 * (distance_to_centroid) / 20)  # [0,1], sharper falloff
         reward += 50 * distance_reward  # scaled to be dominant initially
 
         # === Penalty for sudden moves away from centroid ===
@@ -174,9 +173,12 @@ class UAVSecrecyEnv(gym.Env):
             if distance_to_centroid > prev_dist:
                 reward -= 10  # discourage moving away
 
+            if distance_to_centroid < prev_dist:
+                reward += 20
+
         # === Bonus for stability near centroid ===
         if distance_to_centroid < 100:  # hover threshold
-            reward += 15  # bonus for hovering close
+            reward += 30 # bonus for hovering close
 
         # === Energy efficiency reward ===
         energy_consumption = bs.compute_energy_consumption()
@@ -201,11 +203,11 @@ class UAVSecrecyEnv(gym.Env):
             if dist_to_centroid < bs.prev_distance_to_centroid:
                 reward += 50 # positive for improvement
             else:
-                reward -= 100  # penalty for divergence
+                reward -= 10  # penalty for divergence
         bs.prev_distance_to_centroid = dist_to_centroid
 
         if dist_to_centroid < 100:
-            reward += 50 # bonus for staying close to centroid
+            reward += 75 # bonus for staying close to centroid
 
         reward -= 0.05 * dist_to_centroid
 
@@ -221,6 +223,7 @@ class UAVSecrecyEnv(gym.Env):
                 reward += 8 * masr
 
         return reward
+    '''
 
     def check_constraints(self):
         violations = {
