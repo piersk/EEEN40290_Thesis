@@ -4,8 +4,7 @@ import numpy as np
 import gymnasium as gym
 from gymnasium import spaces
 
-
-# === Ground User Base Classes ===
+# === GU & Eaves ===
 class GroundUser:
     def __init__(self, gu_id, position, cluster_id):
         self.id = gu_id
@@ -24,14 +23,6 @@ class Eavesdropper(GroundUser):
         super().__init__(gu_id, position, cluster_id=-1)
         self.snr_intercept = 0.0
 
-# TODO: Add awareness of GUs to UAV-BS class
-# Add links that can be updated on every timestep 
-# Adjust rewards/penalties to reward proper clustering. In the case of a single UAV-BS, this means ensuring it's centred in between a set of GUs
-# UAVs should require a calibration step in the environment where they identify GUs
-# Eventually, use SVM (QSVM) for Jammer UAVs to classify legitimate and eavesdropping GUs
-# UAV-BS can connect to GUs & UAV Relays
-# UAV Relays connect to UAV-BSs
-# UAV Jammers connect to eavesdropper links 
 # === UAV Base Classes ===
 class UAV:
     def __init__(self, uav_id, position, velocity, tx_power, energy, num_links, mass):
@@ -41,12 +32,10 @@ class UAV:
         self.tx_power = tx_power
         self.energy = energy
         self.history = [self.position.copy()]
-        self.num_links = num_links  # Changed from links to num_links
-        #self.links = np.array(num_links)
+        self.num_links = num_links
         self.mass = mass
-        self.prev_energy_consumption = 0    # Previous energy consumption initialised to 0 J
-        self.prev_tx_power = 0
-        self.prev_velocity = 0
+        self.prev_energy_consumption = 0
+        self.prev_distance_to_centroid = None
 
     def move(self, delta_pos):
         self.position += delta_pos
@@ -66,30 +55,13 @@ class UAV:
         term3 = Lambda * c_t / (self.velocity + 1e-6)
         R_kn = 1.0
         term4 = self.tx_power * R_kn
-        energy_cons = term1 + term2 + term3 + term4
-        return energy_cons
+        return term1 + term2 + term3 + term4
 
-    def form_link(self):
-        links = []
-        return links
-
+# === UAV Base Station ===
 class UAVBaseStation(UAV):
     def __init__(self, *args, coverage_radius=200, **kwargs):
         super().__init__(*args, **kwargs)
         self.coverage_radius = coverage_radius
-        self.legitimate_users = []
-
-# TODO: Include relayed links between UAVs as a list
-class UAVRelay(UAV):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
-# TODO: Include eavesdropping GUs being interfered with as a list
-class UAVJammer(UAV):
-    def __init__(self, *args, noise_power=1.0, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.noise_power = noise_power
-
 
 # === Environment Class ===
 class UAVSecrecyEnv(gym.Env):
@@ -99,55 +71,37 @@ class UAVSecrecyEnv(gym.Env):
         self.num_legit_users = 5
         self.num_eavesdroppers = 1
 
-        # === Constraints ===
-        # TODO: Separate total & maximum per step constraints to ensure adequate mission time is reached 
-        self.P_MAX = 30     # 30 W
-        self.E_MAX = 1000   # 1 kJ 
-        self.R_MIN = 0.75   # 0.75 Minimum MASR
-        self.V_MAX = 30     # 30 m/s
-        self.xmin, self.ymin, self.zmin = 0, 0, 10 
+        self.P_MAX = 30
+        self.E_MAX = 1000
+        self.R_MIN = 0.75
+        self.V_MAX = 30
+        self.xmin, self.ymin, self.zmin = 0, 0, 10
         self.xmax, self.ymax, self.zmax = 5000, 5000, 122
+
+        # Penalty weights
         self.pwr_penalty = self.alt_penalty = self.range_penalty = \
         self.min_rate_penalty = self.energy_penalty = self.velocity_penalty = 10
 
-        # === UAVs ===
-        self.uavs = [
-            UAVBaseStation(0, [0, 0, 0], 0, 10, 1000, num_links=5, mass=2000),
-        ]
+        self.uavs = [UAVBaseStation(0, [0, 0, 0], 0, 10, 1000, num_links=5, mass=2000)]
 
-        # === Users ===
         self.legit_users = [
             LegitimateUser(i, [np.random.uniform(self.xmin, self.xmax),
-                               np.random.uniform(self.ymin, self.ymax),
-                               0], cluster_id=0) for i in range(self.num_legit_users)
+                               np.random.uniform(self.ymin, self.ymax), 0], cluster_id=0)
+            for i in range(self.num_legit_users)
         ]
 
         self.eavesdroppers = [
             Eavesdropper(i, [np.random.uniform(self.xmin, self.xmax),
-                             np.random.uniform(self.ymin, self.ymax),
-                             0]) for i in range(self.num_eavesdroppers)
+                             np.random.uniform(self.ymin, self.ymax), 0])
+            for i in range(self.num_eavesdroppers)
         ]
 
-        # === Communication Topology ===
-        self.link_topology = {
-            # UAV ID : list of connected entity IDs (e.g. UAVs or GUs)
-            0: list(range(self.num_legit_users)),     # BS connects to all GUs
-            1: [0],                                   # Relay connects to BS
-            2: [0, 1]                                 # Jammer targets BS and Relay
-        }
-
-        # === Spaces ===
-        # TODO: POSSIBLE CHANGES REQUIRED FOR THE STATE SPACE DIMENSIONS/SHAPES
-        #self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(self.num_uavs * 3,), dtype=np.float32)
-
         self.observation_space = spaces.Box(
-            low=-np.inf, high=np.inf, 
-            shape=(self.num_uavs * 3 + 3,), dtype=np.float32  # UAV position + centroid (3D)
+            low=-np.inf, high=np.inf, shape=(self.num_uavs * 3 + 3,), dtype=np.float32
         )
-        #self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(self.num_uavs * 3 + 1,), dtype=np.float32)
-        self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(self.num_uavs * 3,), dtype=np.float32)
-        #self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(self.num_uavs * 3 + 1,), dtype=np.float32)
-        #self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(5), dtype=np.float32)
+        self.action_space = spaces.Box(
+            low=-1.0, high=1.0, shape=(self.num_uavs * 3,), dtype=np.float32
+        )
 
     def reset(self, *, seed=None, options=None):
         super().reset(seed=seed)
@@ -155,23 +109,20 @@ class UAVSecrecyEnv(gym.Env):
             uav.position = np.random.uniform([0, 0, 10], [200, 200, 100])
             uav.energy = 1000
             uav.history = [uav.position.copy()]
+            uav.prev_distance_to_centroid = None
         return self._get_obs(), {}
 
     def _get_obs(self):
         uav_pos = np.concatenate([uav.position for uav in self.uavs])
         gu_centroid = np.mean([gu.position for gu in self.legit_users], axis=0)
         return np.concatenate([uav_pos, gu_centroid]).astype(np.float32)
-        #return np.concatenate([uav.position for uav in self.uavs]).astype(np.float32)
 
-    # Normalised AWGN calculation
     def compute_awgn(self):
         return np.random.normal(0, 1)
 
     def compute_snr(self, tx_power, noise_power):
         return 10 * np.log10(tx_power / (noise_power**2 + 1e-9))
 
-    # Minimum Average Secrecy Rate Calculation 
-    # Takes UAV parameters, subcarrier scheduling decision variable, SNR of legitimate GU & UAV-BS channel, SNR of eavesdroppers' channels
     def compute_masr(self, alpha, snr_legit, snr_eaves):
         R_legit = alpha * np.log2(1 + snr_legit)
         R_eaves = np.log2(1 + snr_eaves)
@@ -180,6 +131,7 @@ class UAVSecrecyEnv(gym.Env):
     def step(self, action):
         action = np.clip(action, -1, 1)
         energy_cons_penalty = 0
+
         for i, uav in enumerate(self.uavs):
             delta = action[i*3:(i+1)*3] * 30.0
             uav.move(delta)
@@ -193,7 +145,6 @@ class UAVSecrecyEnv(gym.Env):
         done = any(uav.energy <= 0 for uav in self.uavs)
 
         penalties = self.check_constraints()
-
         total_penalty = sum(v * p for v, p in zip(penalties.values(), [
             self.pwr_penalty, self.alt_penalty, self.range_penalty,
             self.min_rate_penalty, self.energy_penalty, self.velocity_penalty
@@ -201,41 +152,39 @@ class UAVSecrecyEnv(gym.Env):
         reward -= (total_penalty + energy_cons_penalty)
         return self._get_obs(), reward, done, False, {}
 
+
+    '''
     def _compute_reward(self):
         bs = self.uavs[0]
         reward = 0
         noise = self.compute_awgn()
         snr_legit = self.compute_snr(bs.tx_power, noise)
-        masr_total = 0
-        num_served_users = 0
 
-        # === Move closer to centroid of GUs ===
         gu_positions = np.array([gu.position for gu in self.legit_users])
         centroid = np.mean(gu_positions, axis=0)
         distance_to_centroid = np.linalg.norm(bs.position - centroid)
-        #reward += 20 * (1.0 / (1.0 + distance_to_centroid))  # closer → higher reward
-        reward -= 0.1 * distance_to_centroid # Farther away -> lower reward
 
-        # === Minimize energy consumption ===
+        # === Reward closeness to GU cluster centroid ===
+        distance_reward = np.exp(-0.01 * distance_to_centroid)  # [0,1], sharper falloff
+        reward += 50 * distance_reward  # scaled to be dominant initially
+
+        # === Penalty for sudden moves away from centroid ===
+        if len(bs.history) >= 2:
+            prev_dist = np.linalg.norm(bs.history[-2] - centroid)
+            if distance_to_centroid > prev_dist:
+                reward -= 10  # discourage moving away
+
+        # === Bonus for stability near centroid ===
+        if distance_to_centroid < 100:  # hover threshold
+            reward += 15  # bonus for hovering close
+
+        # === Energy efficiency reward ===
         energy_consumption = bs.compute_energy_consumption()
-        bs.prev_energy_consumption = energy_consumption  # update tracking
-        energy_efficiency = 1.0 / (1.0 + energy_consumption)
-        reward += 15 * energy_efficiency
-
-        # === Serve legitimate users ===
-        for gu in self.legit_users:
-            d = np.linalg.norm(bs.position - gu.position)
-            if d < bs.coverage_radius:
-                snr_eaves = max(self.compute_snr(bs.tx_power, noise) for eve in self.eavesdroppers)
-                masr = self.compute_masr(alpha=1, snr_legit=snr_legit, snr_eaves=snr_eaves)
-                reward += 10 * masr
-                masr_total += masr
-                num_served_users += 1
-
-        # === Encourage serving more GUs ===
-        reward += 5 * num_served_users
+        bs.prev_energy_consumption = energy_consumption
+        reward += 10 / (1.0 + energy_consumption)  # inverse relation
 
         return reward
+
     '''
     def _compute_reward(self):
         bs = self.uavs[0]
@@ -243,62 +192,47 @@ class UAVSecrecyEnv(gym.Env):
         noise = self.compute_awgn()
         snr_legit = self.compute_snr(bs.tx_power, noise)
 
-        for uav in self.uavs:
-            if uav.position[0] <= self.xmax:
-                reward += 1
-            if uav.position[1] <= self.ymax:
-                reward += 1
-            if uav.position[2] <= self.zmax:
-                reward += 1
+        gu_positions = np.array([gu.position for gu in self.legit_users])
+        centroid = np.mean(gu_positions, axis=0)
+        dist_to_centroid = np.linalg.norm(bs.position - centroid)
 
-            energy_consumption = uav.compute_energy_consumption()
+        # --- REWARD COMPONENTS ---
+        if bs.prev_distance_to_centroid is not None:
+            if dist_to_centroid < bs.prev_distance_to_centroid:
+                reward += 50 # positive for improvement
+            else:
+                reward -= 100  # penalty for divergence
+        bs.prev_distance_to_centroid = dist_to_centroid
 
-            if energy_consumption <= self.E_MAX:
-                reward += 1
-            if energy_consumption < uav.prev_energy_consumption:
-                reward += 10
-            
-            if uav.velocity <= self.V_MAX:
-                reward += 10
+        if dist_to_centroid < 100:
+            reward += 50 # bonus for staying close to centroid
+
+        reward -= 0.05 * dist_to_centroid
+
+        energy_eff = 1.0 / (1.0 + bs.compute_energy_consumption())
+        reward += 10 * energy_eff
+        bs.prev_energy_consumption = bs.compute_energy_consumption()
 
         for gu in self.legit_users:
             d = np.linalg.norm(bs.position - gu.position)
-
-        # TODO: INCLUDE CODE TO CLOSE DISTANCE ON UAV-BS AND GUs 
-        for gu in self.legit_users:
-            d = np.linalg.norm(bs.position - gu.position)
-            if d <= np.linalg.norm(bs.history[-1]):
-                reward += 5
-
             if d < bs.coverage_radius:
                 snr_eaves = max(self.compute_snr(bs.tx_power, noise) for eve in self.eavesdroppers)
                 masr = self.compute_masr(alpha=1, snr_legit=snr_legit, snr_eaves=snr_eaves)
-                reward += 10 * masr
-
-
-        prev_e_cons = energy_consumption
-        uav.prev_energy_consumption = prev_e_cons
-
-        prev_velocity = uav.velocity
-        uav.prev_velocity = prev_velocity
+                reward += 8 * masr
 
         return reward
-    '''
 
     def check_constraints(self):
         violations = {
             "power": sum(uav.tx_power for uav in self.uavs) > self.P_MAX,
-            "altitude": False,
-            "range": False,
-            "min_rate": False,
-            "energy": False,
-            "velocity": False
+            "altitude": False, "range": False, "min_rate": False,
+            "energy": False, "velocity": False
         }
         for uav in self.uavs:
-            x, y, h = uav.position
+            x, y, z = uav.position
             if not (self.xmin <= x <= self.xmax and self.ymin <= y <= self.ymax):
                 violations["range"] = True
-            if not (self.zmin <= h <= self.zmax):
+            if not (self.zmin <= z <= self.zmax):
                 violations["altitude"] = True
             if uav.energy <= 0 or uav.energy > self.E_MAX:
                 violations["energy"] = True
