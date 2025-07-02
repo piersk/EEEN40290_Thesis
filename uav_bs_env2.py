@@ -133,6 +133,7 @@ class UAVSecrecyEnv(gym.Env):
         energy_cons_penalty = 0
 
         for i, uav in enumerate(self.uavs):
+            # TODO: UPDATE TO SET THE VELOCITY FROM V_MAX TO A MORE DYNAMIC VELOCITY 
             delta = action[i*3:(i+1)*3] * 30.0
             uav.move(delta)
             uav_energy_cons = uav.compute_energy_consumption()
@@ -164,21 +165,33 @@ class UAVSecrecyEnv(gym.Env):
         distance_to_centroid = np.linalg.norm(bs.position - centroid)
 
         # === Reward closeness to GU cluster centroid ===
-        distance_reward = np.exp(-0.01 * (distance_to_centroid) / 20)  # [0,1], sharper falloff
-        reward += 50 * distance_reward  # scaled to be dominant initially
+        #distance_reward = np.exp(-0.01 * (distance_to_centroid) / 20)  # [0,1], sharper falloff
+        #reward += 50 * distance_reward  # scaled to be dominant initially
+        distance_reward = (1 / np.log1p(distance_to_centroid))
+        reward += 100 * distance_reward
 
         # === Penalty for sudden moves away from centroid ===
         if len(bs.history) >= 2:
             prev_dist = np.linalg.norm(bs.history[-2] - centroid)
             if distance_to_centroid > prev_dist:
-                reward -= 10  # discourage moving away
+                reward -= 50  # discourage moving away
 
             if distance_to_centroid < prev_dist:
                 reward += 20
 
-        # === Bonus for stability near centroid ===
-        if distance_to_centroid < 100:  # hover threshold
-            reward += 30 # bonus for hovering close
+        # === Bonus rewards for stability near centroid ===
+        # Penalty for large distance from centroid
+        if distance_to_centroid >= 225:
+            reward -= 50
+
+        if distance_to_centroid < 200:
+            reward += 10
+        if distance_to_centroid < 100:
+            reward += 25
+        if distance_to_centroid < 50:   # hover threshold
+            reward += 50                # bonus for hovering close
+        if distance_to_centroid < 25:
+            reward += 75
 
         # === Energy efficiency reward ===
         energy_consumption = bs.compute_energy_consumption()
