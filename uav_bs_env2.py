@@ -76,7 +76,8 @@ class UAVSecrecyEnv(gym.Env):
         self.R_MIN = 0.75
         self.V_MAX = 30
         self.xmin, self.ymin, self.zmin = 0, 0, 10
-        self.xmax, self.ymax, self.zmax = 5000, 5000, 122
+        self.xmax, self.ymax, self.zmax = 150, 150, 122
+        #self.xmax, self.ymax, self.zmax = 5000, 5000, 122
 
         # Penalty weights
         self.pwr_penalty = self.alt_penalty = self.range_penalty = \
@@ -181,16 +182,22 @@ class UAVSecrecyEnv(gym.Env):
 
         # === Bonus rewards for stability near centroid ===
         # Penalty for large distance from centroid
-        if distance_to_centroid >= 225:
+        if distance_to_centroid >= 50:
             reward -= 50
 
+            '''
         if distance_to_centroid < 200:
             reward += 10
         if distance_to_centroid < 100:
             reward += 25
         if distance_to_centroid < 50:   # hover threshold
             reward += 50                # bonus for hovering close
+            '''
         if distance_to_centroid < 25:
+            reward += 20 
+        if distance_to_centroid < 10:
+            reward += 50 
+        if distance_to_centroid < 5:
             reward += 75
 
         # === Energy efficiency reward ===
