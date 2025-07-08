@@ -36,6 +36,7 @@ class UAV:
         self.mass = mass
         self.prev_energy_consumption = 0
         self.prev_distance_to_centroid = None
+        self.E_REM = 30000
 
     def move(self, delta_pos):
         self.position += delta_pos

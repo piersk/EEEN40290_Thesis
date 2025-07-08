@@ -90,6 +90,7 @@ class UAVSecrecyEnv(gym.Env):
 
         # === Constraints ===
         # TODO: Separate total & maximum per step constraints to ensure adequate mission time is reached 
+        # Probably need to increase maximum energy massively (on the order of 500kJ rather than 1kJ)
         self.P_MAX = 30     # 30 W
         self.E_MAX = 1000   # 1 kJ 
         self.R_MIN = 0.75   # 0.75 Minimum MASR
