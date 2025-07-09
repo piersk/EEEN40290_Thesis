@@ -138,7 +138,7 @@ class UAV_LQDRL_Environment(gym.Env):
             low=-1.0, high=1.0, shape=(5,), dtype=np.float32
         )
 
-        def reset(self, *, seed=Non, options=None):
+        def reset(self, *, seed=None, options=None):
             super().reset(seed=seed)
             for uav in self.uavs:
                 uav.position = np.random.uniform([0, 0, 10], [200, 200, 100])
