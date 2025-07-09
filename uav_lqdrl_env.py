@@ -41,10 +41,16 @@ class UAV:
         self.prev_energy_consumption = 0    # Previous energy consumption initialised to 0 J
         self.prev_tx_power = 0
         self.prev_velocity = 0
+        
 
+
+    # TODO: Call compute_velocity here
+    # Function to move UAV in 3-D Cartesian Space
     def move(self, delta_pos):
         self.position += delta_pos
         self.velocity = np.linalg.norm(delta_pos)
+        # TODO: FIGURE OUT HOW TO CALCULATE ZETA
+        self.velocity = self.compute_velocity(zeta)
         self.history.append(self.position.copy())
 
     def get_distance_travelled(self):
@@ -62,6 +68,13 @@ class UAV:
         term4 = self.tx_power * R_kn
         energy_cons = term1 + term2 + term3 + term4
         return energy_cons
+
+    # TODO: Compute zeta either in another function based on the observed state or here
+    # Function to compute the velocity of the UAV for any timestep t
+    # Zeta must be computed as a variable between 0 and 1 to scale against V_MAX
+    def compute_velocity(self, zeta):
+        v = zeta * self.V_MAX
+        return v
 
 class UAVBaseStation(UAV):
     def __init__(self, *args, coverage_radius=200, **kwargs):
@@ -83,7 +96,7 @@ class UAVJammer(UAV):
 
 # TODO: Program memory experience relay to include the following:
 # State Space:
-# Energy consumed per episode as per the equation: E_remain(t) = E_remain(t-1) - E_cons
+# Energy consumed per timestep as per the equation: E_remain(t) = E_remain(t-1) - E_cons
 # UAV Position (q_UAV in thesis and Zhang et. al (2025) but denoted as c(t) in Silviaranti et. al (2025))
 # GU clustering u_K
 # Dimensions: 2K, where K=number of GUs + 1 for energy consumption + 1 for UAV position - amounting to 2K+4 state space dimensions
@@ -95,7 +108,7 @@ class UAV_LQDRL_Environment(gym.Env):
     def __init__(self):
         super().__init__()
         self.num_uavs = 1
-        self.legit_users = 4
+        self.num_legit_users = 4
 
         self.P_MAX = 30
         self.E_MAX = 500e3  # 500kJ in paper
@@ -111,7 +124,59 @@ class UAV_LQDRL_Environment(gym.Env):
         ]
 
         self.legit_users = [
-            LegitimateUser(i, [np.random.uniform(self.xmin, self.xmax), np.random.uniform(self.ymin, self.ymax), np.random.uniform(self.zmin, self.zmax)], cluster_id = 0) for i in range(self.num_legit_users)
+            LegitimateUser(i, [np.random.uniform(self.xmin, self.xmax), np.random.uniform(self.ymin, self.ymax), np.random.uniform(self.zmin, self.zmax)], cluster_id = 0) 
+            for i in range(self.num_legit_users)
         ]
 
-        
+        # 2K+4 Dimensional Observation Space
+        self.observation_space = spaces.Box(
+            low=-np.inf, high=np.inf, shape=((2 * self.num_legit_users) + 4,), dtype=np.float32
+        )
+
+        # 5-D Action Space
+        self.action_space = spaces.Box(
+            low=-1.0, high=1.0, shape=(5,), dtype=np.float32
+        )
+
+        def reset(self, *, seed=Non, options=None):
+            super().reset(seed=seed)
+            for uav in self.uavs:
+                uav.position = np.random.uniform([0, 0, 10], [200, 200, 100])
+                uav.energy = 1000
+                uav.history = [uav.position.copy()]
+                uav.prev_distance_to_centroid = None
+            return self._get_obs(), {}
+
+        def _get_obs(self):
+            uav_pos = np.concatenate([uav.position for uav in self.uavs])
+            gu_centroid = np.mean([gu.position for gu in self.legit_users], axis=0)
+            return np.concatenate([uav_pos, gu_centroid]).astype(np.float32)
+
+        def compute_awgn(self):
+            return np.random.normal(0, 1)
+
+
+        # TODO: INCLUDE SELF-LINK TOPOLOGY DICTIONARY
+
+        # TODO: STEP FUNCTION
+        def step(self, action):
+            
+            return self._get_obs(), reward, done, False, {}
+
+        # TODO: REWARD FUNCTION
+        def _compute_reward(self):
+
+            return reward
+
+        # TODO: CONSTRAINTS VIOLATIONS FUNCTION
+        def check_constraints(self):
+
+            violations = {
+                
+            }
+
+            return constraints
+
+        # TODO: RENDER FUNCTION (KEEP AS EMPTY FOR NOW AS RENDERING TO BE ADDED IN LQDRL NOTEBOOK)
+        def render(self):
+            pass
