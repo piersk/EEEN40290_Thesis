@@ -41,7 +41,7 @@ class UAV:
         self.prev_energy_consumption = 0    # Previous energy consumption initialised to 0 J
         self.prev_tx_power = 0
         self.prev_velocity = 0
-        
+        self.zeta = 1   # Default zeta value = 1
 
 
     # TODO: Call compute_velocity here
@@ -50,7 +50,7 @@ class UAV:
         self.position += delta_pos
         self.velocity = np.linalg.norm(delta_pos)
         # TODO: FIGURE OUT HOW TO CALCULATE ZETA
-        self.velocity = self.compute_velocity(zeta)
+        self.velocity = self.compute_velocity(self.zeta)
         self.history.append(self.position.copy())
 
     def get_distance_travelled(self):
@@ -68,6 +68,10 @@ class UAV:
         term4 = self.tx_power * R_kn
         energy_cons = term1 + term2 + term3 + term4
         return energy_cons
+
+    def compute_zeta(self, dist_to_centroid):
+        zeta = 1 - ((self.xmax - dist_to_centroid) / (self.xmax - self.xmin))
+        return zeta
 
     # TODO: Compute zeta either in another function based on the observed state or here
     # Function to compute the velocity of the UAV for any timestep t
@@ -155,11 +159,24 @@ class UAV_LQDRL_Environment(gym.Env):
         def compute_awgn(self):
             return np.random.normal(0, 1)
 
+        def compute_snr(self, tx_power, noise_power):
+            return 10 * np.log10(tx_power, noise_power**2 + 1e-9))
+
+
 
         # TODO: INCLUDE SELF-LINK TOPOLOGY DICTIONARY
 
         # TODO: STEP FUNCTION
         def step(self, action):
+            action = np.clip(action, -1, 1)
+            
+            for i, uav in enumerate(self.uavs):
+                gu_positions = np.array([gu.position for gu in self.legit_users])
+                gu_centroid = np.mean(gu_positions, axis=0)
+                dist_to_centroid = np.linalg.norm(uav.position - centroid)
+                zeta = self.compute_zeta(dist_to_centroid)
+                v = uav.compute_velocity(zeta)
+
             
             return self._get_obs(), reward, done, False, {}
 
