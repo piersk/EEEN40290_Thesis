@@ -50,7 +50,7 @@ class UAV:
         self.position += delta_pos
         self.velocity = np.linalg.norm(delta_pos)
         # TODO: FIGURE OUT HOW TO CALCULATE ZETA
-        self.velocity = self.compute_velocity(self.zeta)
+        #self.velocity = self.compute_velocity(self.zeta)
         self.history.append(self.position.copy())
 
     def get_distance_travelled(self):
@@ -174,14 +174,54 @@ class UAV_LQDRL_Environment(gym.Env):
                 gu_positions = np.array([gu.position for gu in self.legit_users])
                 gu_centroid = np.mean(gu_positions, axis=0)
                 dist_to_centroid = np.linalg.norm(uav.position - centroid)
-                zeta = self.compute_zeta(dist_to_centroid)
+                # Only slow down speed when reasonably close to the GU centroid
+                if dist_to_centroid <= 25:
+                    zeta = self.compute_zeta(dist_to_centroid)
+                else:
+                    zeta = 1
                 v = uav.compute_velocity(zeta)
+                delta = action[i*3:(i+1)*3] * v
+                uav.move(delta)
+                uav_energy_cons = uav.compute_energy_consumption()
+                uav.energy -= uav_energy_cons
 
+                if uav_energy_cons > uav.prev_energy_consumption:
+                    energy_cons_penalty += 10
+
+            reward = self._compute_reward()
+            done = any(uav.energy <= 0 for uav in self.uavs)
+            penalties = self.check_constraints()
+            total_penalty = sum(v * p for v, p in zip(penalties.values(), [
+                self.pwr_penalty, self.alt_penalty, self.range_penalty,
+                self.min_rate_penalty, self.energy_penalty, self.velocity_penalty
+            ]))
+            reward -= (total_penalty + energy_cons_penalty)
             
             return self._get_obs(), reward, done, False, {}
 
+        # TODO: IMPLEMENT MASR COMPUTATION IN HERE FOR ENERGY EFFICIENCY COMPUTATION
+        def _compute_energy_efficiency(self, masr, energy_cons):
+            energy_eff = masr / energy_cons
+            return energy_eff 
+
         # TODO: REWARD FUNCTION
+        # Function is incomplete and cannot work without MASR computation
+        # Reward shaping function should factor in the following:
+        # Data transmission/secrecy rate
+        # Energy efficiency
+        # Distance to GU centroid for clustering/grouping of GUs by the UAV-BS
         def _compute_reward(self):
+            bs = self.uavs[0]
+            reward = 0
+            noise = self._compute_awgn()
+            snr_legit = self.compute_snr(bs.tx_power, noise)
+            gu_positions = np.array([gu.position for gu in self.legit_users])
+            centroid = np.mean(gu_positions, axis=0)
+            distance_to_centroid = np.linalg.norm(bs.position - centroid)
+            energy_consumption = bs.compute_energy_consumption()
+            bs.prev_energy_consumption = energy_consumption
+            energy_eff = self._compute_energy_efficiency(masr, energy_consumption) 
+            reward += energy_eff 
 
             return reward
 
