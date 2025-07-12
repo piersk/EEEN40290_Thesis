@@ -160,9 +160,21 @@ class UAV_LQDRL_Environment(gym.Env):
             return np.random.normal(0, 1)
 
         def compute_snr(self, tx_power, noise_power):
-            return 10 * np.log10(tx_power, noise_power**2 + 1e-9))
+            return 10 * np.log10(tx_power / noise_power**2 + 1e-9))
 
+        # TODO: COMPUTE SUM RATE HERE 
+        def compute_sum_rate(self, subchan_bw, snr):
+            sum_rate = subchan_bw * np.log2(1 + snr)
+            return sum_rate
 
+        def apply_power_allocation(self, scalar):
+            return self.P_MAX * np.clip(scalar, 0.1, 1.0)
+
+        def apply_noma_grouping(self, action_scalar):
+            # Example: 0.25 → Group 0, 0.75 → Group 3
+            group_id = int(np.clip(action_scalar * self.num_legit_users, 0, self.num_legit_users - 1))
+            for i, gu in enumerate(self.legit_users):
+                gu.cluster_id = group_id
 
         # TODO: INCLUDE SELF-LINK TOPOLOGY DICTIONARY
 
@@ -229,8 +241,24 @@ class UAV_LQDRL_Environment(gym.Env):
         def check_constraints(self):
 
             violations = {
-                
+                "range": False,
+                "altitude": False,
+                "energy": False,
+                "velocity": False
             }
+
+            for uav in self.uavs:
+                x, y, z = uav.position
+                if not (self.xmin <= x <= self.xmax and self.ymin <= y <= self.ymax):
+                    violations["range"] = True
+                if uav.energy <= 0:
+                    violations["energy"] = True
+                if uav.energy > self.E_MAX:
+                    violations["energy"] = True
+                if not (self.zmin <= z <= self.zmax):
+                    violations["altitude"] = True
+                if uav.velocity > self.V_MAX:
+                    violations["velocity"] = True
 
             return constraints
 
