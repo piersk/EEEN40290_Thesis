@@ -142,126 +142,126 @@ class UAV_LQDRL_Environment(gym.Env):
             low=-1.0, high=1.0, shape=(5,), dtype=np.float32
         )
 
-        def reset(self, *, seed=None, options=None):
-            super().reset(seed=seed)
-            for uav in self.uavs:
-                uav.position = np.random.uniform([0, 0, 10], [200, 200, 100])
-                uav.energy = 1000
-                uav.history = [uav.position.copy()]
-                uav.prev_distance_to_centroid = None
-            return self._get_obs(), {}
+    def reset(self, *, seed=None, options=None):
+        super().reset(seed=seed)
+        for uav in self.uavs:
+            uav.position = np.random.uniform([0, 0, 10], [200, 200, 100])
+            uav.energy = 1000
+            uav.history = [uav.position.copy()]
+            uav.prev_distance_to_centroid = None
+        return self._get_obs(), {}
 
-        def _get_obs(self):
-            uav_pos = np.concatenate([uav.position for uav in self.uavs])
-            gu_centroid = np.mean([gu.position for gu in self.legit_users], axis=0)
-            return np.concatenate([uav_pos, gu_centroid]).astype(np.float32)
+    def _get_obs(self):
+        uav_pos = np.concatenate([uav.position for uav in self.uavs])
+        gu_centroid = np.mean([gu.position for gu in self.legit_users], axis=0)
+        return np.concatenate([uav_pos, gu_centroid]).astype(np.float32)
 
-        def compute_awgn(self):
-            return np.random.normal(0, 1)
+    def compute_awgn(self):
+        return np.random.normal(0, 1)
 
-        def compute_snr(self, tx_power, noise_power):
-            return 10 * np.log10(tx_power / noise_power**2 + 1e-9))
+    def compute_snr(self, tx_power, noise_power):
+        return 10 * np.log10(tx_power / noise_power**2 + 1e-9))
 
-        # TODO: COMPUTE SUM RATE HERE 
-        def compute_sum_rate(self, subchan_bw, snr):
-            sum_rate = subchan_bw * np.log2(1 + snr)
-            return sum_rate
+    # TODO: COMPUTE SUM RATE HERE 
+    def compute_sum_rate(self, subchan_bw, snr):
+        sum_rate = subchan_bw * np.log2(1 + snr)
+        return sum_rate
 
-        def apply_power_allocation(self, scalar):
-            return self.P_MAX * np.clip(scalar, 0.1, 1.0)
+    def apply_power_allocation(self, scalar):
+        return self.P_MAX * np.clip(scalar, 0.1, 1.0)
 
-        def apply_noma_grouping(self, action_scalar):
-            # Example: 0.25 → Group 0, 0.75 → Group 3
-            group_id = int(np.clip(action_scalar * self.num_legit_users, 0, self.num_legit_users - 1))
-            for i, gu in enumerate(self.legit_users):
-                gu.cluster_id = group_id
+    def apply_noma_grouping(self, action_scalar):
+        # Example: 0.25 → Group 0, 0.75 → Group 3
+        group_id = int(np.clip(action_scalar * self.num_legit_users, 0, self.num_legit_users - 1))
+        for i, gu in enumerate(self.legit_users):
+            gu.cluster_id = group_id
 
-        # TODO: INCLUDE SELF-LINK TOPOLOGY DICTIONARY
+    # TODO: INCLUDE SELF-LINK TOPOLOGY DICTIONARY
 
-        # TODO: STEP FUNCTION
-        def step(self, action):
-            action = np.clip(action, -1, 1)
-            
-            for i, uav in enumerate(self.uavs):
-                gu_positions = np.array([gu.position for gu in self.legit_users])
-                gu_centroid = np.mean(gu_positions, axis=0)
-                dist_to_centroid = np.linalg.norm(uav.position - centroid)
-                # Only slow down speed when reasonably close to the GU centroid
-                if dist_to_centroid <= 25:
-                    zeta = self.compute_zeta(dist_to_centroid)
-                else:
-                    zeta = 1
-                v = uav.compute_velocity(zeta)
-                delta = action[i*3:(i+1)*3] * v
-                uav.move(delta)
-                uav_energy_cons = uav.compute_energy_consumption()
-                uav.energy -= uav_energy_cons
-
-                if uav_energy_cons > uav.prev_energy_consumption:
-                    energy_cons_penalty += 10
-
-            reward = self._compute_reward()
-            done = any(uav.energy <= 0 for uav in self.uavs)
-            penalties = self.check_constraints()
-            total_penalty = sum(v * p for v, p in zip(penalties.values(), [
-                self.pwr_penalty, self.alt_penalty, self.range_penalty,
-                self.min_rate_penalty, self.energy_penalty, self.velocity_penalty
-            ]))
-            reward -= (total_penalty + energy_cons_penalty)
-            
-            return self._get_obs(), reward, done, False, {}
-
-        # TODO: IMPLEMENT MASR COMPUTATION IN HERE FOR ENERGY EFFICIENCY COMPUTATION
-        def _compute_energy_efficiency(self, masr, energy_cons):
-            energy_eff = masr / energy_cons
-            return energy_eff 
-
-        # TODO: REWARD FUNCTION
-        # Function is incomplete and cannot work without MASR computation
-        # Reward shaping function should factor in the following:
-        # Data transmission/secrecy rate
-        # Energy efficiency
-        # Distance to GU centroid for clustering/grouping of GUs by the UAV-BS
-        def _compute_reward(self):
-            bs = self.uavs[0]
-            reward = 0
-            noise = self._compute_awgn()
-            snr_legit = self.compute_snr(bs.tx_power, noise)
+    # TODO: STEP FUNCTION
+    def step(self, action):
+        action = np.clip(action, -1, 1)
+        
+        for i, uav in enumerate(self.uavs):
             gu_positions = np.array([gu.position for gu in self.legit_users])
-            centroid = np.mean(gu_positions, axis=0)
-            distance_to_centroid = np.linalg.norm(bs.position - centroid)
-            energy_consumption = bs.compute_energy_consumption()
-            bs.prev_energy_consumption = energy_consumption
-            energy_eff = self._compute_energy_efficiency(masr, energy_consumption) 
-            reward += energy_eff 
+            gu_centroid = np.mean(gu_positions, axis=0)
+            dist_to_centroid = np.linalg.norm(uav.position - centroid)
+            # Only slow down speed when reasonably close to the GU centroid
+            if dist_to_centroid <= 25:
+                zeta = self.compute_zeta(dist_to_centroid)
+            else:
+                zeta = 1
+            v = uav.compute_velocity(zeta)
+            delta = action[i*3:(i+1)*3] * v
+            uav.move(delta)
+            uav_energy_cons = uav.compute_energy_consumption()
+            uav.energy -= uav_energy_cons
 
-            return reward
+            if uav_energy_cons > uav.prev_energy_consumption:
+                energy_cons_penalty += 10
 
-        # TODO: CONSTRAINTS VIOLATIONS FUNCTION
-        def check_constraints(self):
+        reward = self._compute_reward()
+        done = any(uav.energy <= 0 for uav in self.uavs)
+        penalties = self.check_constraints()
+        total_penalty = sum(v * p for v, p in zip(penalties.values(), [
+            self.pwr_penalty, self.alt_penalty, self.range_penalty,
+            self.min_rate_penalty, self.energy_penalty, self.velocity_penalty
+        ]))
+        reward -= (total_penalty + energy_cons_penalty)
+        
+        return self._get_obs(), reward, done, False, {}
 
-            violations = {
-                "range": False,
-                "altitude": False,
-                "energy": False,
-                "velocity": False
-            }
+    # TODO: IMPLEMENT MASR COMPUTATION IN HERE FOR ENERGY EFFICIENCY COMPUTATION
+    def _compute_energy_efficiency(self, masr, energy_cons):
+        energy_eff = masr / energy_cons
+        return energy_eff 
 
-            for uav in self.uavs:
-                x, y, z = uav.position
-                if not (self.xmin <= x <= self.xmax and self.ymin <= y <= self.ymax):
-                    violations["range"] = True
-                if uav.energy <= 0:
-                    violations["energy"] = True
-                if uav.energy > self.E_MAX:
-                    violations["energy"] = True
-                if not (self.zmin <= z <= self.zmax):
-                    violations["altitude"] = True
-                if uav.velocity > self.V_MAX:
-                    violations["velocity"] = True
+    # TODO: REWARD FUNCTION
+    # Function is incomplete and cannot work without MASR computation
+    # Reward shaping function should factor in the following:
+    # Data transmission/secrecy rate
+    # Energy efficiency
+    # Distance to GU centroid for clustering/grouping of GUs by the UAV-BS
+    def _compute_reward(self):
+        bs = self.uavs[0]
+        reward = 0
+        noise = self._compute_awgn()
+        snr_legit = self.compute_snr(bs.tx_power, noise)
+        gu_positions = np.array([gu.position for gu in self.legit_users])
+        centroid = np.mean(gu_positions, axis=0)
+        distance_to_centroid = np.linalg.norm(bs.position - centroid)
+        energy_consumption = bs.compute_energy_consumption()
+        bs.prev_energy_consumption = energy_consumption
+        energy_eff = self._compute_energy_efficiency(masr, energy_consumption) 
+        reward += energy_eff 
 
-            return constraints
+        return reward
 
-        # TODO: RENDER FUNCTION (KEEP AS EMPTY FOR NOW AS RENDERING TO BE ADDED IN LQDRL NOTEBOOK)
-        def render(self):
-            pass
+    # TODO: CONSTRAINTS VIOLATIONS FUNCTION
+    def check_constraints(self):
+
+        violations = {
+            "range": False,
+            "altitude": False,
+            "energy": False,
+            "velocity": False
+        }
+
+        for uav in self.uavs:
+            x, y, z = uav.position
+            if not (self.xmin <= x <= self.xmax and self.ymin <= y <= self.ymax):
+                violations["range"] = True
+            if uav.energy <= 0:
+                violations["energy"] = True
+            if uav.energy > self.E_MAX:
+                violations["energy"] = True
+            if not (self.zmin <= z <= self.zmax):
+                violations["altitude"] = True
+            if uav.velocity > self.V_MAX:
+                violations["velocity"] = True
+
+        return constraints
+
+    # TODO: RENDER FUNCTION (KEEP AS EMPTY FOR NOW AS RENDERING TO BE ADDED IN LQDRL NOTEBOOK)
+    def render(self):
+        pass
