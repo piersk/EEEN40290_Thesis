@@ -128,7 +128,10 @@ class UAV_LQDRL_Environment(gym.Env):
         ]
 
         self.legit_users = [
-            LegitimateUser(i, [np.random.uniform(self.xmin, self.xmax), np.random.uniform(self.ymin, self.ymax), np.random.uniform(self.zmin, self.zmax)], cluster_id = 0) 
+            LegitimateUser(i, [np.random.uniform(self.xmin, self.xmax), 
+                               np.random.uniform(self.ymin, self.ymax), 
+                               np.random.uniform(self.zmin, self.zmax)], 
+                           cluster_id = 0) 
             for i in range(self.num_legit_users)
         ]
 
@@ -153,6 +156,8 @@ class UAV_LQDRL_Environment(gym.Env):
 
     def _get_obs(self):
         uav_pos = np.concatenate([uav.position for uav in self.uavs])
+        gu_pos = np.concatenate([gu.position[:2] for gu in self.legit_users])
+        uav_energy = np.array([self.uavs[0].energy], dtype=np.float32)
         gu_centroid = np.mean([gu.position for gu in self.legit_users], axis=0)
         return np.concatenate([uav_pos, gu_centroid]).astype(np.float32)
 
@@ -164,8 +169,8 @@ class UAV_LQDRL_Environment(gym.Env):
 
     # TODO: COMPUTE SUM RATE HERE 
     def compute_sum_rate(self, subchan_bw, snr):
-        sum_rate = subchan_bw * np.log2(1 + snr)
-        return sum_rate
+        sum_rate_k = subchan_bw * np.log2(1 + snr)
+        return sum_rate_k
 
     def apply_power_allocation(self, scalar):
         return self.P_MAX * np.clip(scalar, 0.1, 1.0)
@@ -175,6 +180,9 @@ class UAV_LQDRL_Environment(gym.Env):
         group_id = int(np.clip(action_scalar * self.num_legit_users, 0, self.num_legit_users - 1))
         for i, gu in enumerate(self.legit_users):
             gu.cluster_id = group_id
+
+    def _compute_energy_efficiency(self, sum_rate_arr, energy_cons):
+        return sum_rate / (energy_cons)
 
     # TODO: INCLUDE SELF-LINK TOPOLOGY DICTIONARY
 
@@ -192,8 +200,16 @@ class UAV_LQDRL_Environment(gym.Env):
             else:
                 zeta = 1
             v = uav.compute_velocity(zeta)
-            delta = action[i*3:(i+1)*3] * v
+            #delta = action[i*3:(i+1)*3] * v
+            delta = action[:3] * v
             uav.move(delta)
+
+            # TODO: ADD SUBCHANNEL BWS TO ARRAY HERE FOR UAVs & GUs
+            # PASS SUBCHANNEL BWS TO COMPUTE_SUM_RATE
+            # PASS RESULTS FROM THIS TO COMPUTE ENERGY EFFICIENCY FUNCTION
+            # CALL COMPUTE REWARD FUNCTION HERE TO DO THIS
+            # CALCULATE REWARDS BASED ON ENERGY EFFICIENCY SUCH THAT SUM RATE IS MORE THAN THE MINIMUM DESIRABLE SUM RATE (ONLY ALLOCATE IF R_sum > R_min)
+
             uav_energy_cons = uav.compute_energy_consumption()
             uav.energy -= uav_energy_cons
 
@@ -212,9 +228,11 @@ class UAV_LQDRL_Environment(gym.Env):
         return self._get_obs(), reward, done, False, {}
 
     # TODO: IMPLEMENT MASR COMPUTATION IN HERE FOR ENERGY EFFICIENCY COMPUTATION
+    '''
     def _compute_energy_efficiency(self, masr, energy_cons):
         energy_eff = masr / energy_cons
         return energy_eff 
+    '''
 
     # TODO: REWARD FUNCTION
     # Function is incomplete and cannot work without MASR computation
