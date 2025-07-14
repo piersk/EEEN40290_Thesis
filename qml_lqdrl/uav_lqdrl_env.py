@@ -219,7 +219,7 @@ class UAV_LQDRL_Environment(gym.Env):
         for i, uav in enumerate(self.uavs):
             gu_positions = np.array([gu.position for gu in self.legit_users])
             gu_centroid = np.mean(gu_positions, axis=0)
-            dist_to_centroid = np.linalg.norm(uav.position - centroid)
+            dist_to_centroid = np.linalg.norm(uav.position - gu_centroid)
             # Only slow down speed when reasonably close to the GU centroid
             if dist_to_centroid <= 25:
                 zeta = self.compute_zeta(dist_to_centroid)
