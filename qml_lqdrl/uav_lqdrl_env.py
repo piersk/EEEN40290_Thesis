@@ -69,16 +69,6 @@ class UAV:
         energy_cons = term1 + term2 + term3 + term4
         return energy_cons
 
-    def compute_zeta(self, dist_to_centroid):
-        zeta = 1 - ((self.xmax - dist_to_centroid) / (self.xmax - self.xmin))
-        return zeta
-
-    # TODO: Compute zeta either in another function based on the observed state or here
-    # Function to compute the velocity of the UAV for any timestep t
-    # Zeta must be computed as a variable between 0 and 1 to scale against V_MAX
-    def compute_velocity(self, zeta):
-        v = zeta * self.V_MAX
-        return v
 
 class UAVBaseStation(UAV):
     def __init__(self, *args, coverage_radius=200, **kwargs):
@@ -125,7 +115,7 @@ class UAV_LQDRL_Environment(gym.Env):
 
         # TODO: DETERMINE APPROPRIATE CARRIER FREQUENCY
         # USE 1MHz PLACEHOLDER FOR NOW
-        f_carr = 1e06
+        self.f_carr = 1e06
         
         self.uavs = [
             UAVBaseStation(0, [0, 0, 0], 0, 10, 1000, num_links=4, mass=2000)
@@ -166,6 +156,18 @@ class UAV_LQDRL_Environment(gym.Env):
         #gu_centroid = np.mean([gu.position for gu in self.legit_users], axis=0)
         return np.concatenate([uav_pos, gu_pos, uav_energy]).astype(np.float32)
 
+    # TODO: MOVE SPEED COMPUTATION TO ENVIRONMENT 
+    def compute_zeta(self, dist_to_centroid):
+        zeta = 1 - ((self.xmax - dist_to_centroid) / (self.xmax - self.xmin))
+        return zeta
+
+    # TODO: Compute zeta either in another function based on the observed state or here
+    # Function to compute the velocity of the UAV for any timestep t
+    # Zeta must be computed as a variable between 0 and 1 to scale against V_MAX
+    def compute_velocity(self, zeta):
+        v = zeta * self.V_MAX
+        return v
+
     def compute_awgn(self):
         return np.random.normal(0, 1)
 
@@ -189,19 +191,19 @@ class UAV_LQDRL_Environment(gym.Env):
     def compute_subcarrier_allocation(self, f_carrier):
         i = 0
         bw_arr = [0 for i in range(self.num_legit_users)]
-        for gus in self.legit_gus:
+        for gus in self.legit_users:
             bw_arr[i] = ((i + 1) * f_carrier - i * f_carrier)
             i += 1
         return bw_arr
 
     def compute_sum_rate(self, bw_arr, snr):
         sum_rate_arr = []
-        for k in range(self.num_legit_gus):
+        for k in range(self.num_legit_users):
             r_k = bw_arr[k] * np.log2(1 + snr)
             sum_rate_arr.append(r_k)
         return sum_rate_arr
 
-    def _compute_energy_efficiency(self, sum_rate_arr, energy_cons):
+    def _compute_energy_efficiency(self, sum_rate, energy_cons):
         return sum_rate / (energy_cons)
 
     def _compute_gu_centroid(self):
@@ -215,6 +217,7 @@ class UAV_LQDRL_Environment(gym.Env):
     # Function to compute the action (a) taken by the UAV agent(s) based on state (s)
     def step(self, action):
         action = np.clip(action, -1, 1)
+        energy_cons_penalty = 0
         
         for i, uav in enumerate(self.uavs):
             gu_positions = np.array([gu.position for gu in self.legit_users])
@@ -225,12 +228,14 @@ class UAV_LQDRL_Environment(gym.Env):
                 zeta = self.compute_zeta(dist_to_centroid)
             else:
                 zeta = 1
-            v = uav.compute_velocity(zeta)
+            v = self.compute_velocity(zeta)
             #delta = action[i*3:(i+1)*3] * v
             delta = action[:3] * v
             uav.move(delta)
 
             # TODO: ADD SUBCHANNEL BWS TO ARRAY HERE FOR UAVs & GUs
+            # NB: THIS WAS DONE IN _compute_reward()
+
             # PASS SUBCHANNEL BWS TO COMPUTE_SUM_RATE
             # PASS RESULTS FROM THIS TO COMPUTE ENERGY EFFICIENCY FUNCTION
             # CALL COMPUTE REWARD FUNCTION HERE TO DO THIS
@@ -270,16 +275,17 @@ class UAV_LQDRL_Environment(gym.Env):
     def _compute_reward(self):
         bs = self.uavs[0]
         reward = 0
-        noise = self._compute_awgn()
+        noise = self.compute_awgn()
         snr_legit = self.compute_snr(bs.tx_power, noise)
         gu_positions = np.array([gu.position for gu in self.legit_users])
         centroid = np.mean(gu_positions, axis=0)
         distance_to_centroid = np.linalg.norm(bs.position - centroid)
+        bw_arr = self.compute_subcarrier_allocation(self.f_carr)
+        sum_rate_arr = self.compute_sum_rate(bw_arr, snr_legit)
+        masr = np.sum(sum_rate_arr, axis=0)
         energy_consumption = bs.compute_energy_consumption()
         bs.prev_energy_consumption = energy_consumption
         energy_eff = self._compute_energy_efficiency(masr, energy_consumption) 
-        bw_arr = compute_subcarrier_allocation(f_carr)
-        sum_rate_arr = compute_sum_rate(bw_arr, snr_legit)
 
         # Greater reward for more GUs achieving R_sum > R_min
         for k in range(self.num_legit_users):
@@ -314,7 +320,7 @@ class UAV_LQDRL_Environment(gym.Env):
             if uav.velocity > self.V_MAX:
                 violations["velocity"] = True
 
-        return constraints
+        return violations
 
     # TODO: RENDER FUNCTION (KEEP AS EMPTY FOR NOW AS RENDERING TO BE ADDED IN LQDRL NOTEBOOK)
     def render(self):
