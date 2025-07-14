@@ -122,6 +122,10 @@ class UAV_LQDRL_Environment(gym.Env):
         self.xmax, self.ymax, self.zmax = 1500, 1500, 122
         self.pwr_penalty = self.alt_penalty = self.range_penalty = \
         self.min_rate_penalty = self.energy_penalty = self.velocity_penalty = 10
+
+        # TODO: DETERMINE APPROPRIATE CARRIER FREQUENCY
+        # USE 1MHz PLACEHOLDER FOR NOW
+        f_carr = 1e06
         
         self.uavs = [
             UAVBaseStation(0, [0, 0, 0], 0, 10, 1000, num_links=4, mass=2000)
@@ -154,12 +158,13 @@ class UAV_LQDRL_Environment(gym.Env):
             uav.prev_distance_to_centroid = None
         return self._get_obs(), {}
 
+    # Function returns the observation state space of the environment (s)
     def _get_obs(self):
         uav_pos = np.concatenate([uav.position for uav in self.uavs])
         gu_pos = np.concatenate([gu.position[:2] for gu in self.legit_users])
         uav_energy = np.array([self.uavs[0].energy], dtype=np.float32)
-        gu_centroid = np.mean([gu.position for gu in self.legit_users], axis=0)
-        return np.concatenate([uav_pos, gu_centroid]).astype(np.float32)
+        #gu_centroid = np.mean([gu.position for gu in self.legit_users], axis=0)
+        return np.concatenate([uav_pos, gu_pos, uav_energy]).astype(np.float32)
 
     def compute_awgn(self):
         return np.random.normal(0, 1)
@@ -181,12 +186,33 @@ class UAV_LQDRL_Environment(gym.Env):
         for i, gu in enumerate(self.legit_users):
             gu.cluster_id = group_id
 
+    def compute_subcarrier_allocation(self, f_carrier):
+        i = 0
+        bw_arr = [0 for i in range(self.num_legit_users)]
+        for gus in self.legit_gus:
+            bw_arr[i] = ((i + 1) * f_carrier - i * f_carrier)
+            i += 1
+        return bw_arr
+
+    def compute_sum_rate(self, bw_arr, snr):
+        sum_rate_arr = []
+        for k in range(self.num_legit_gus):
+            r_k = bw_arr[k] * np.log2(1 + snr)
+            sum_rate_arr.append(r_k)
+        return sum_rate_arr
+
     def _compute_energy_efficiency(self, sum_rate_arr, energy_cons):
         return sum_rate / (energy_cons)
+
+    def _compute_gu_centroid(self):
+        gu_positions = np.array([gu.position for gu in self.legit_users])
+        gu_centroid = np.mean(gu_positions, axis=0)
+        return gu_centroid 
 
     # TODO: INCLUDE SELF-LINK TOPOLOGY DICTIONARY
 
     # TODO: STEP FUNCTION
+    # Function to compute the action (a) taken by the UAV agent(s) based on state (s)
     def step(self, action):
         action = np.clip(action, -1, 1)
         
@@ -240,6 +266,7 @@ class UAV_LQDRL_Environment(gym.Env):
     # Data transmission/secrecy rate
     # Energy efficiency
     # Distance to GU centroid for clustering/grouping of GUs by the UAV-BS
+    # Function to compute the reward allocated based on action a relative to a policy pi for a given state (s)
     def _compute_reward(self):
         bs = self.uavs[0]
         reward = 0
@@ -251,7 +278,15 @@ class UAV_LQDRL_Environment(gym.Env):
         energy_consumption = bs.compute_energy_consumption()
         bs.prev_energy_consumption = energy_consumption
         energy_eff = self._compute_energy_efficiency(masr, energy_consumption) 
-        reward += energy_eff 
+        bw_arr = compute_subcarrier_allocation(f_carr)
+        sum_rate_arr = compute_sum_rate(bw_arr, snr_legit)
+
+        for k in range(self.num_legit_users):
+            if sum_rate_arr[k] > self.R_MIN:
+                reward += energy_eff 
+            else:
+                reward += 0
+        #reward += energy_eff 
 
         return reward
 
