@@ -1,5 +1,6 @@
 import pennylane as qml
 from pennylane import numpy as np
+from pennylane.optimize import AdamOptimizer
 
 class QuantumActor:
     def __init__(self, n_qubits, m_layers):
@@ -12,8 +13,9 @@ class QuantumActor:
         def circuit(x, theta):
             for i in range(n_qubits):
                 qml.Hadamard(wires=i)
-                qml.RX(x[i], wires=i)
             for l in range(m_layers):
+                for i in range(n_qubits):
+                    qml.RX(x[i], wires=i)
                 for i in range(n_qubits):
                     qml.RY(theta[l][i], wires=i)
                 for i in range(n_qubits - 1):
@@ -36,8 +38,9 @@ class QuantumCritic:
         def circuit(x, theta):
             for i in range(n_qubits):
                 qml.Hadamard(wires=i)
-                qml.RX(x[i], wires=i)
             for l in range(m_layers):
+                for i in range(n_qubits):
+                    qml.RX(x[i], wires=i)
                 for i in range(n_qubits):
                     qml.RY(theta[l][i], wires=i)
                 for i in range(n_qubits - 1):
