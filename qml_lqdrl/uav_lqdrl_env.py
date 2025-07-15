@@ -175,7 +175,7 @@ class UAV_LQDRL_Environment(gym.Env):
         return 10 * np.log10(tx_power / noise_power**2 + 1e-9)
 
     # TODO: COMPUTE SUM RATE HERE 
-    def compute_sum_rate(self, subchan_bw, snr):
+    def compute_r_k(self, subchan_bw, snr):
         sum_rate_k = subchan_bw * np.log2(1 + snr)
         return sum_rate_k
 

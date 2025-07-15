@@ -1,6 +1,5 @@
 import pennylane as qml
 from pennylane import numpy as np
-from pennylane.optimize import AdamOptimizer
 
 class QuantumActor:
     def __init__(self, n_qubits, m_layers):
@@ -16,16 +15,25 @@ class QuantumActor:
             for l in range(m_layers):
                 for i in range(n_qubits):
                     qml.RX(x[i], wires=i)
-                for i in range(n_qubits):
-                    qml.RY(theta[l][i], wires=i)
                 for i in range(n_qubits - 1):
                     qml.CZ(wires=[i, i+1])
+                for i in range(n_qubits):
+                    qml.RY(theta[l][i], wires=i)
             return [qml.expval(qml.PauliZ(i)) for i in range(n_qubits)]
 
         self.qnode = circuit
 
     def __call__(self, x):
         return self.qnode(x, self.theta)
+
+    def update_params(self, new_theta):
+        self.theta = new_theta
+
+    def draw(self, x):
+        return qml.draw(self.qnode)(x, self.theta)
+
+    def latex(self, x):
+        return qml.draw_mpl(self.qnode)(x, self.theta)
 
 class QuantumCritic:
     def __init__(self, n_qubits, m_layers):
@@ -41,13 +49,22 @@ class QuantumCritic:
             for l in range(m_layers):
                 for i in range(n_qubits):
                     qml.RX(x[i], wires=i)
-                for i in range(n_qubits):
-                    qml.RY(theta[l][i], wires=i)
                 for i in range(n_qubits - 1):
                     qml.CZ(wires=[i, i+1])
+                for i in range(n_qubits):
+                    qml.RY(theta[l][i], wires=i)
             return qml.expval(qml.PauliZ(0))
 
         self.qnode = circuit
 
     def __call__(self, x):
         return self.qnode(x, self.theta)
+
+    def update_params(self, new_theta):
+        self.theta = new_theta
+
+    def draw(self, x):
+        return qml.draw(self.qnode)(x, self.theta)
+
+    def latex(self, x):
+        return qml.draw_mpl(self.qnode)(x, self.theta)
