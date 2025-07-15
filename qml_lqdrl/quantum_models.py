@@ -53,7 +53,8 @@ class QuantumCritic:
                     qml.CZ(wires=[i, i+1])
                 for i in range(n_qubits):
                     qml.RY(theta[l][i], wires=i)
-            return qml.expval(qml.PauliZ(0))
+            #return qml.expval(qml.PauliZ(0))
+            return [qml.expval(qml.PauliZ(i)) for i in range(n_qubits)]
 
         self.qnode = circuit
 
