@@ -43,14 +43,10 @@ class UAV:
         self.prev_velocity = 0
         self.zeta = 1   # Default zeta value = 1
 
-
-    # TODO: Call compute_velocity here
     # Function to move UAV in 3-D Cartesian Space
     def move(self, delta_pos):
         self.position += delta_pos
         self.velocity = np.linalg.norm(delta_pos)
-        # TODO: FIGURE OUT HOW TO CALCULATE ZETA
-        #self.velocity = self.compute_velocity(self.zeta)
         self.history.append(self.position.copy())
 
     def get_distance_travelled(self):
@@ -60,6 +56,7 @@ class UAV:
 
     def compute_energy_consumption(self, g=9.81, k=6.65, num_rotors=4, rho=1.225, theta=0.3, Lambda=0.15):
         c_t = self.get_distance_travelled()
+        c_t = abs(c_t)
         n_sum = self.mass
         term1 = (n_sum * g * c_t) / (k * num_rotors)
         term2 = ((n_sum * g) ** 1.5) / np.sqrt(2 * num_rotors * rho * theta)
@@ -168,6 +165,11 @@ class UAV_LQDRL_Environment(gym.Env):
         v = zeta * self.V_MAX
         return v
 
+    def get_uav_position(self):
+        for uav in self.uavs:
+            position = uav.position
+        return position
+
     def compute_awgn(self):
         return np.random.normal(0, 1)
 
@@ -192,7 +194,7 @@ class UAV_LQDRL_Environment(gym.Env):
         i = 0
         bw_arr = [0 for i in range(self.num_legit_users)]
         for gus in self.legit_users:
-            bw_arr[i] = ((i + 1) * f_carrier - i * f_carrier)
+            bw_arr[i] = (((i + 1) * f_carrier) - (i * f_carrier))
             i += 1
         return bw_arr
 
@@ -214,6 +216,7 @@ class UAV_LQDRL_Environment(gym.Env):
     # TODO: INCLUDE SELF-LINK TOPOLOGY DICTIONARY
 
     # TODO: STEP FUNCTION
+    # TODO: IMPLEMENT MORE CONTROLLED MOVEMENT (POLAR CO-ORDINATES AS WRITTEN IN PAPER)
     # Function to compute the action (a) taken by the UAV agent(s) based on state (s)
     def step(self, action):
         action = np.clip(action, -1, 1)
@@ -294,6 +297,13 @@ class UAV_LQDRL_Environment(gym.Env):
             else:
                 reward += 0 # No reward granted. Just placing this here to match the function even though it's redundant 
         #reward += energy_eff 
+
+        '''
+        if distance_to_centroid <= 10:
+            reward += 20
+        elif distance_to_centroid >= 50:
+            reward -= 10
+        '''
 
         return reward
 
