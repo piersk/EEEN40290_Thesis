@@ -70,11 +70,11 @@ class QuantumCritic:
     def latex(self, x):
         return qml.draw_mpl(self.qnode)(x, self.theta)
 
-    def decode_op(self, q_values, method="mean"):
+    def decode_op(self, q_values, scale=30, method="mean"):
         """Decode multi-qubit outputs."""
         q_array = qml.numpy.stack(q_values) if isinstance(q_values, (list, tuple)) else q_values
         if method == "mean":
-            return qml.numpy.mean(q_array)
+            return scale * qml.numpy.mean(q_array)
         elif method == "sum":
             return qml.numpy.sum(q_array)
         else:
