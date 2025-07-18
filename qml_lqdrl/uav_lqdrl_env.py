@@ -298,12 +298,10 @@ class UAV_LQDRL_Environment(gym.Env):
                 reward += 0 # No reward granted. Just placing this here to match the function even though it's redundant 
         #reward += energy_eff 
 
-        '''
         if distance_to_centroid <= 10:
             reward += 20
-        elif distance_to_centroid >= 50:
-            reward -= 10
-        '''
+        #elif distance_to_centroid >= 50:
+        #    reward -= 10
 
         return reward
 
