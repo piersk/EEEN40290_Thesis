@@ -166,9 +166,18 @@ class UAV_LQDRL_Environment(gym.Env):
         return v
 
     def get_uav_position(self):
+        position_arr = []
         for uav in self.uavs:
             position = uav.position
-        return position
+            position_arr.append(position)
+        return position_arr
+
+    def get_uav_history(self):
+        hist_arr = []
+        for uav in self.uavs:
+            hist = uav.history
+            hist_arr.append(hist)
+        return hist_arr
 
     def compute_awgn(self):
         return np.random.normal(0, 1)
@@ -221,11 +230,11 @@ class UAV_LQDRL_Environment(gym.Env):
     def step(self, action):
         action = np.clip(action, -1, 1)
         energy_cons_penalty = 0
-        
         for i, uav in enumerate(self.uavs):
             gu_positions = np.array([gu.position for gu in self.legit_users])
             gu_centroid = np.mean(gu_positions, axis=0)
             dist_to_centroid = np.linalg.norm(uav.position - gu_centroid)
+            # TODO: IMPLEMENT BETTER STEERING IN Z-AXIS & XY-PLANE
             # Only slow down speed when reasonably close to the GU centroid
             if dist_to_centroid <= 25:
                 zeta = self.compute_zeta(dist_to_centroid)
