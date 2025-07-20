@@ -54,7 +54,7 @@ class UAV:
             return 0
         return np.linalg.norm(self.history[-1] - self.history[-2])
 
-    def compute_energy_consumption(self, g=9.81, k=6.65, num_rotors=4, rho=1.225, theta=0.3, Lambda=0.15):
+    def compute_energy_consumption(self, g=9.81, k=6.65, num_rotors=4, rho=1.225, theta=0.0507**2, Lambda=0.15):
         c_t = self.get_distance_travelled()
         c_t = abs(c_t)
         n_sum = self.mass
@@ -98,6 +98,8 @@ class UAVJammer(UAV):
 class UAV_LQDRL_Environment(gym.Env):
     def __init__(self):
         super().__init__()
+        self.time = 0
+        self.delta_t = 0.1
         self.num_uavs = 1
         self.num_legit_users = 4
 
@@ -106,7 +108,8 @@ class UAV_LQDRL_Environment(gym.Env):
         self.R_MIN = 0.75
         self.V_MAX = 50     # 50 m/s in paper
         self.xmin, self.ymin, self.zmin = 0, 0, 10 
-        self.xmax, self.ymax, self.zmax = 1500, 1500, 122
+        #self.xmax, self.ymax, self.zmax = 1500, 1500, 122
+        self.xmax, self.ymax, self.zmax = 150, 150, 122
         self.pwr_penalty = self.alt_penalty = self.range_penalty = \
         self.min_rate_penalty = self.energy_penalty = self.velocity_penalty = 10
 
@@ -115,7 +118,8 @@ class UAV_LQDRL_Environment(gym.Env):
         self.f_carr = 1e06
         
         self.uavs = [
-            UAVBaseStation(0, [0, 0, 0], 0, 10, 1000, num_links=4, mass=2000)
+            #UAVBaseStation(0, [0, 0, 0], 0, 10, 1000, num_links=4, mass=2000)
+            UAVBaseStation(0, [0, 0, 0], 0, 10, 1000, num_links=4, mass=1.46)
         ]
 
         self.legit_users = [
@@ -153,17 +157,22 @@ class UAV_LQDRL_Environment(gym.Env):
         #gu_centroid = np.mean([gu.position for gu in self.legit_users], axis=0)
         return np.concatenate([uav_pos, gu_pos, uav_energy]).astype(np.float32)
 
-    # TODO: MOVE SPEED COMPUTATION TO ENVIRONMENT 
     def compute_zeta(self, dist_to_centroid):
         zeta = 1 - ((self.xmax - dist_to_centroid) / (self.xmax - self.xmin))
         return zeta
 
-    # TODO: Compute zeta either in another function based on the observed state or here
     # Function to compute the velocity of the UAV for any timestep t
     # Zeta must be computed as a variable between 0 and 1 to scale against V_MAX
     def compute_velocity(self, zeta):
         v = zeta * self.V_MAX
         return v
+
+    # TODO: COMPUTE POLAR ANGLE CONSANTS FOR UAV TO MOVE UP, DOWN, LEFT & RIGHT 
+    # Must determine angle between UAV trajectory vector and GU centroid in z-axis and xy-plane 
+    def compute_polar_angles(self):
+        zeta_p = 0
+        zeta_a = 0
+        return zeta_p, zeta_a
 
     def get_uav_position(self):
         position_arr = []
@@ -225,7 +234,7 @@ class UAV_LQDRL_Environment(gym.Env):
     # TODO: INCLUDE SELF-LINK TOPOLOGY DICTIONARY
 
     # TODO: STEP FUNCTION
-    # TODO: IMPLEMENT MORE CONTROLLED MOVEMENT (POLAR CO-ORDINATES AS WRITTEN IN PAPER)
+    # TODO: IMPLEMENT MORE CONTROLLED MOVEMENT (POLAR CO-ORDINATES AS WRITTEN IN PAPER
     # Function to compute the action (a) taken by the UAV agent(s) based on state (s)
     def step(self, action):
         action = np.clip(action, -1, 1)
@@ -307,8 +316,8 @@ class UAV_LQDRL_Environment(gym.Env):
                 reward += 0 # No reward granted. Just placing this here to match the function even though it's redundant 
         #reward += energy_eff 
 
-        if distance_to_centroid <= 10:
-            reward += 20
+        #if distance_to_centroid <= 10:
+            #reward += 20
         #elif distance_to_centroid >= 50:
         #    reward -= 10
 
