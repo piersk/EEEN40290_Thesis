@@ -99,7 +99,7 @@ class UAV_LQDRL_Environment(gym.Env):
     def __init__(self):
         super().__init__()
         self.time = 0
-        self.delta_t = 0.1
+        self.delta_t = 1
         self.num_uavs = 1
         self.num_legit_users = 4
 
@@ -125,7 +125,7 @@ class UAV_LQDRL_Environment(gym.Env):
         self.legit_users = [
             LegitimateUser(i, [np.random.uniform(self.xmin, self.xmax), 
                                np.random.uniform(self.ymin, self.ymax), 
-                               np.random.uniform(self.zmin, self.zmax)], 
+                               np.random.uniform(0, 0)], 
                            cluster_id = 0) 
             for i in range(self.num_legit_users)
         ]
@@ -143,8 +143,9 @@ class UAV_LQDRL_Environment(gym.Env):
     def reset(self, *, seed=None, options=None):
         super().reset(seed=seed)
         for uav in self.uavs:
-            uav.position = np.random.uniform([0, 0, 10], [200, 200, 100])
-            uav.energy = 1000
+            #uav.position = np.random.uniform([0, 0, 10], [200, 200, 100])
+            uav.position = np.random.uniform([self.xmin, self.ymin, self.zmin], [self.xmax, self.ymax, self.zmax])
+            uav.energy = self.E_MAX
             uav.history = [uav.position.copy()]
             uav.prev_distance_to_centroid = None
         return self._get_obs(), {}
@@ -175,11 +176,22 @@ class UAV_LQDRL_Environment(gym.Env):
         return zeta_p, zeta_a
 
     def get_uav_position(self):
+        for uav in self.uavs:
+            position = uav.position
+        return position
+
+    def get_remaining_energy(self):
+        for uav in self.uavs:
+            e_remain = uav.energy
+        return e_remain 
+    '''
+    def get_uav_position(self):
         position_arr = []
         for uav in self.uavs:
             position = uav.position
             position_arr.append(position)
         return position_arr
+    '''
 
     def get_uav_history(self):
         hist_arr = []
@@ -249,9 +261,9 @@ class UAV_LQDRL_Environment(gym.Env):
                 zeta = self.compute_zeta(dist_to_centroid)
             else:
                 zeta = 1
-            v = self.compute_velocity(zeta)
+            dist = self.compute_velocity(zeta) * self.delta_t
             #delta = action[i*3:(i+1)*3] * v
-            delta = action[:3] * v
+            delta = action[:3] * dist
             uav.move(delta)
 
             # TODO: ADD SUBCHANNEL BWS TO ARRAY HERE FOR UAVs & GUs
@@ -301,6 +313,7 @@ class UAV_LQDRL_Environment(gym.Env):
         gu_positions = np.array([gu.position for gu in self.legit_users])
         centroid = np.mean(gu_positions, axis=0)
         distance_to_centroid = np.linalg.norm(bs.position - centroid)
+        bs.prev_dist_to_centroid = distance_to_centroid
         bw_arr = self.compute_subcarrier_allocation(self.f_carr)
         sum_rate_arr = self.compute_sum_rate(bw_arr, snr_legit)
         masr = np.sum(sum_rate_arr, axis=0)
