@@ -3,6 +3,9 @@
 # Implementation of the proposed LQ-DRL algorithm presented in Silvirianti et al. (2025)
 # All GU instantiation should just be handled by GroundUser parent class for this program
 # Possibly remove the Relay & Jammer UAVs for this implementation/version
+
+# TODO: ENSURE THE PENALTIES ARE SCALED SO THAT THEY ACTUALLY MAKE A DENT TO THE REWARDS
+# TODO: ENSURE THE UAV CANNOT GO OUTSIDE OF THE BOUNDS SET BY x, y, z MAX AND MIN
 import numpy as np
 import gymnasium as gym
 from gymnasium import spaces
@@ -46,6 +49,8 @@ class UAV:
     # Function to move UAV in 3-D Cartesian Space
     def move(self, delta_pos):
         self.position += delta_pos
+        if (self.position[2] <= 0):
+            self.position[2] = 0
         self.velocity = np.linalg.norm(delta_pos)
         self.history.append(self.position.copy())
 
@@ -54,18 +59,19 @@ class UAV:
             return 0
         return np.linalg.norm(self.history[-1] - self.history[-2])
 
-    def compute_energy_consumption(self, g=9.81, k=6.65, num_rotors=4, rho=1.225, theta=0.0507**2, Lambda=0.15):
+    # 100 J/s avionics power from d'Andrea et al (2014)
+    def compute_energy_consumption(self, g=9.81, k=6.65, num_rotors=4, rho=1.225, theta=0.0507, Lambda=100):
         c_t = self.get_distance_travelled()
         c_t = abs(c_t)
         n_sum = self.mass
-        term1 = (n_sum * g * c_t) / (k * num_rotors)
-        term2 = ((n_sum * g) ** 1.5) / np.sqrt(2 * num_rotors * rho * theta)
-        term3 = Lambda * c_t / (self.velocity + 1e-6)
+        travel = (n_sum * g * c_t) / (k * num_rotors)
+        hover = ((n_sum * g) ** 1.5) / np.sqrt(2 * num_rotors * rho * theta)
+        #term3 = Lambda * c_t / (self.velocity + 1e-6)
+        avionics = Lambda * c_t / (self.velocity)
         R_kn = 1.0
-        term4 = self.tx_power * R_kn
-        energy_cons = term1 + term2 + term3 + term4
+        comms = self.tx_power * R_kn
+        energy_cons = travel + hover + avionics + comms
         return energy_cons
-
 
 class UAVBaseStation(UAV):
     def __init__(self, *args, coverage_radius=200, **kwargs):
@@ -107,11 +113,12 @@ class UAV_LQDRL_Environment(gym.Env):
         self.E_MAX = 500e3  # 500kJ in paper
         self.R_MIN = 0.75
         self.V_MAX = 50     # 50 m/s in paper
+        #self.V_MAX = 10
         self.xmin, self.ymin, self.zmin = 0, 0, 10 
         #self.xmax, self.ymax, self.zmax = 1500, 1500, 122
         self.xmax, self.ymax, self.zmax = 150, 150, 122
         self.pwr_penalty = self.alt_penalty = self.range_penalty = \
-        self.min_rate_penalty = self.energy_penalty = self.velocity_penalty = 10
+        self.min_rate_penalty = self.energy_penalty = self.velocity_penalty = 0.1
 
         # TODO: DETERMINE APPROPRIATE CARRIER FREQUENCY
         # USE 1MHz PLACEHOLDER FOR NOW
@@ -119,7 +126,7 @@ class UAV_LQDRL_Environment(gym.Env):
         
         self.uavs = [
             #UAVBaseStation(0, [0, 0, 0], 0, 10, 1000, num_links=4, mass=2000)
-            UAVBaseStation(0, [0, 0, 0], 0, 10, 1000, num_links=4, mass=1.46)
+            UAVBaseStation(0, [0, 0, 0], 0, self.P_MAX, self.E_MAX, num_links=self.num_legit_users, mass=1.46)
         ]
 
         self.legit_users = [
@@ -274,11 +281,11 @@ class UAV_LQDRL_Environment(gym.Env):
             # CALL COMPUTE REWARD FUNCTION HERE TO DO THIS
             # CALCULATE REWARDS BASED ON ENERGY EFFICIENCY SUCH THAT SUM RATE IS MORE THAN THE MINIMUM DESIRABLE SUM RATE (ONLY ALLOCATE IF R_sum > R_min)
 
-            uav_energy_cons = uav.compute_energy_consumption()
+            uav_energy_cons = uav.compute_energy_consumption() 
             uav.energy -= uav_energy_cons
 
             if uav_energy_cons > uav.prev_energy_consumption:
-                energy_cons_penalty += 10
+                energy_cons_penalty += 0.1
 
         reward = self._compute_reward()
         done = any(uav.energy <= 0 for uav in self.uavs)
@@ -287,7 +294,8 @@ class UAV_LQDRL_Environment(gym.Env):
             self.pwr_penalty, self.alt_penalty, self.range_penalty,
             self.min_rate_penalty, self.energy_penalty, self.velocity_penalty
         ]))
-        reward -= (total_penalty + energy_cons_penalty)
+        reward -= reward * (total_penalty + energy_cons_penalty)
+        #reward -= (total_penalty + energy_cons_penalty)
         
         return self._get_obs(), reward, done, False, {}
 
@@ -308,6 +316,7 @@ class UAV_LQDRL_Environment(gym.Env):
     def _compute_reward(self):
         bs = self.uavs[0]
         reward = 0
+        grant_reward = False
         noise = self.compute_awgn()
         snr_legit = self.compute_snr(bs.tx_power, noise)
         gu_positions = np.array([gu.position for gu in self.legit_users])
@@ -324,10 +333,15 @@ class UAV_LQDRL_Environment(gym.Env):
         # Greater reward for more GUs achieving R_sum > R_min
         for k in range(self.num_legit_users):
             if sum_rate_arr[k] > self.R_MIN:
-                reward += energy_eff 
+                grant_reward = True
+                #reward += energy_eff 
             else:
+                grant_reward = False
                 reward += 0 # No reward granted. Just placing this here to match the function even though it's redundant 
         #reward += energy_eff 
+
+        if grant_reward == True:
+            reward += energy_eff
 
         #if distance_to_centroid <= 10:
             #reward += 20
