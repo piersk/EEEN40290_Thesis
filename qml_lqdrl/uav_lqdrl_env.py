@@ -60,7 +60,8 @@ class UAV:
         return np.linalg.norm(self.history[-1] - self.history[-2])
 
     # 100 J/s avionics power from d'Andrea et al (2014)
-    def compute_energy_consumption(self, g=9.81, k=6.65, num_rotors=4, rho=1.225, theta=0.0507, Lambda=100):
+    #def compute_energy_consumption(self, num_uavs, sum_rate_arr, g=9.81, k=6.65, num_rotors=4, rho=1.225, theta=0.0507, Lambda=100):
+    def compute_energy_consumption(self, sum_rate_arr, g=9.81, k=6.65, num_rotors=4, rho=1.225, theta=0.0507, Lambda=100):
         c_t = self.get_distance_travelled()
         c_t = abs(c_t)
         n_sum = self.mass
@@ -68,8 +69,12 @@ class UAV:
         hover = ((n_sum * g) ** 1.5) / np.sqrt(2 * num_rotors * rho * theta)
         #term3 = Lambda * c_t / (self.velocity + 1e-6)
         avionics = Lambda * c_t / (self.velocity)
-        R_kn = 1.0
-        comms = self.tx_power * R_kn
+        # TODO: REPLACE R_kn CONSTANT WITH COMPUTED SUM RATE FOR UAV-GU LINKS
+        #R_kn = 1.0
+        # TODO: MAY REQUIRE A 2-D ARRAY FOR SUM RATES IN FUTURE FOR MULTIPLE UAV-BS AGENTS IN FUTURE
+        for k in range(len(sum_rate_arr)):
+            comms += self.tx_power * sum_rate_arr[k]
+        #comms = self.tx_power * R_kn
         energy_cons = travel + hover + avionics + comms
         return energy_cons
 
@@ -113,10 +118,9 @@ class UAV_LQDRL_Environment(gym.Env):
         self.E_MAX = 500e3  # 500kJ in paper
         self.R_MIN = 0.75
         self.V_MAX = 50     # 50 m/s in paper
-        #self.V_MAX = 10
         self.xmin, self.ymin, self.zmin = 0, 0, 10 
-        #self.xmax, self.ymax, self.zmax = 1500, 1500, 122
         self.xmax, self.ymax, self.zmax = 150, 150, 122
+        # Penalty values are for scaling the reward based on constraint violations
         self.pwr_penalty = self.alt_penalty = self.range_penalty = \
         self.min_rate_penalty = self.energy_penalty = self.velocity_penalty = 0.1
 
@@ -191,6 +195,7 @@ class UAV_LQDRL_Environment(gym.Env):
         for uav in self.uavs:
             e_remain = uav.energy
         return e_remain 
+
     '''
     def get_uav_position(self):
         position_arr = []
@@ -280,8 +285,11 @@ class UAV_LQDRL_Environment(gym.Env):
             # PASS RESULTS FROM THIS TO COMPUTE ENERGY EFFICIENCY FUNCTION
             # CALL COMPUTE REWARD FUNCTION HERE TO DO THIS
             # CALCULATE REWARDS BASED ON ENERGY EFFICIENCY SUCH THAT SUM RATE IS MORE THAN THE MINIMUM DESIRABLE SUM RATE (ONLY ALLOCATE IF R_sum > R_min)
+            noise = self.compute_awgn()
+            snr_legit = self.compute_snr(uav.tx_power, noise)
 
-            uav_energy_cons = uav.compute_energy_consumption() 
+            sum_rate_arr = self.compute_sum_rate(bw_arr, snr_legit)
+            uav_energy_cons = uav.compute_energy_consumption(sum_rate_arr)
             uav.energy -= uav_energy_cons
 
             if uav_energy_cons > uav.prev_energy_consumption:
@@ -326,12 +334,12 @@ class UAV_LQDRL_Environment(gym.Env):
         bw_arr = self.compute_subcarrier_allocation(self.f_carr)
         sum_rate_arr = self.compute_sum_rate(bw_arr, snr_legit)
         masr = np.sum(sum_rate_arr, axis=0)
-        energy_consumption = bs.compute_energy_consumption()
+        energy_consumption = bs.compute_energy_consumption(sum_rate_arr)
         bs.prev_energy_consumption = energy_consumption
-        energy_eff = self._compute_energy_efficiency(masr, energy_consumption) 
+        energy_eff = self._compute_energy_efficiency(masr, energy_consumption)
 
         # Greater reward for more GUs achieving R_sum > R_min
-        # Only grant reward if all sum rates are above the minimum sum rate
+        # Only grant reward if all secret key rates are above the minimum sum rate (i.e., for all k GUs)
         j = 0
         for k in range(self.num_legit_users):
             if sum_rate_arr[k] > self.R_MIN:
