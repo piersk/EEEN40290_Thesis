@@ -331,9 +331,13 @@ class UAV_LQDRL_Environment(gym.Env):
         energy_eff = self._compute_energy_efficiency(masr, energy_consumption) 
 
         # Greater reward for more GUs achieving R_sum > R_min
+        # Only grant reward if all sum rates are above the minimum sum rate
+        j = 0
         for k in range(self.num_legit_users):
             if sum_rate_arr[k] > self.R_MIN:
-                grant_reward = True
+                j += 1
+                if (k == 4 and j == 4):
+                    grant_reward = True
                 #reward += energy_eff 
             else:
                 grant_reward = False
@@ -352,7 +356,6 @@ class UAV_LQDRL_Environment(gym.Env):
 
     # TODO: CONSTRAINTS VIOLATIONS FUNCTION
     def check_constraints(self):
-
         violations = {
             "range": False,
             "altitude": False,
