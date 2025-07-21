@@ -53,7 +53,6 @@ class QuantumCritic:
                     qml.CZ(wires=[i, i+1])
                 for i in range(n_qubits):
                     qml.RY(theta[l][i], wires=i)
-            #return qml.expval(qml.PauliZ(0))
             return [qml.expval(qml.PauliZ(i)) for i in range(n_qubits)]
 
         self.qnode = circuit
@@ -80,26 +79,9 @@ class QuantumCritic:
         else:
             raise ValueError("Unknown decoding method")
 
-    #def decode(self, q_values, k_shots):
-
-
     def evaluate(self, x, k_shots=10):
         total = np.zeros(self.n_qubits)
         for k in range(k_shots):
             total += self.qnode(x, self.theta)
         avg_q_per_qubit = total / k_shots
         return avg_q_per_qubit 
-
-    '''
-    def evaluate(self, x, k_shots=10, method="mean"):
-        """Performs K-shot averaging of critic output and returns scalar."""
-        values = [self.qnode(x, self.theta) for _ in range(k_shots)]
-        stacked = qml.numpy.stack(values)  # shape (k_shots, n_qubits)
-        mean_per_qubit = qml.numpy.mean(stacked, axis=0)  # shape (n_qubits,)
-        if method == "mean":
-            return qml.numpy.mean(mean_per_qubit)  # final scalar
-        elif method == "sum":
-            return qml.numpy.sum(mean_per_qubit)
-        else:
-            raise ValueError("Unknown decoding method") 
-    '''
