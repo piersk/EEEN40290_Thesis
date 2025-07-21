@@ -303,16 +303,8 @@ class UAV_LQDRL_Environment(gym.Env):
             self.min_rate_penalty, self.energy_penalty, self.velocity_penalty
         ]))
         reward -= reward * (total_penalty + energy_cons_penalty)
-        #reward -= (total_penalty + energy_cons_penalty)
         
         return self._get_obs(), reward, done, False, {}
-
-    # TODO: IMPLEMENT MASR COMPUTATION IN HERE FOR ENERGY EFFICIENCY COMPUTATION
-    '''
-    def _compute_energy_efficiency(self, masr, energy_cons):
-        energy_eff = masr / energy_cons
-        return energy_eff 
-    '''
 
     # TODO: REWARD FUNCTION
     # Function is incomplete and cannot work without MASR computation
@@ -349,7 +341,7 @@ class UAV_LQDRL_Environment(gym.Env):
                 #reward += energy_eff 
             else:
                 grant_reward = False
-                reward += 0 # No reward granted. Just placing this here to match the function even though it's redundant 
+                #reward += 0 # No reward granted. Just placing this here to match the function even though it's redundant 
         #reward += energy_eff 
 
         if grant_reward == True:
