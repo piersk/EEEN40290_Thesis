@@ -32,6 +32,7 @@ def plot_uav_trajectory(env, uav_trajectory, ep, t):
     plt.legend()
     plt.savefig(f'eg_plots/uav_trajectory_{ep}_timestep_{t}.png')
 
+# Importing modules required for experiments
 from uav_lqdrl_env import UAV_LQDRL_Environment
 from quantum_models import QuantumActor, QuantumCritic
 from replay_buffer import ReplayBuffer
@@ -148,12 +149,12 @@ for ep in range(episodes):
             actor_losses.append(actor_loss_val)
             time_var += time_step
         time_arr.append(time_var)
-        #plot_uav_position(env)
         plot_uav_trajectory(env, ep_uav_trajectory, ep, i)
         step_end_time = time.time()
         step_time = step_start_time - step_end_time 
         print(f"Time taken for step {i} to execute: ", step_time, " seconds")
         i += 1
+        # Break out of episode early (for debugging purposes)
         break_var += 1
         if break_var >= 10:
             break
