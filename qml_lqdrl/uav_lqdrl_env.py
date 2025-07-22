@@ -70,11 +70,12 @@ class UAV:
         #term3 = Lambda * c_t / (self.velocity + 1e-6)
         avionics = Lambda * c_t / (self.velocity)
         # TODO: REPLACE R_kn CONSTANT WITH COMPUTED SUM RATE FOR UAV-GU LINKS
-        #R_kn = 1.0
+        R_kn = 1.0
         # TODO: MAY REQUIRE A 2-D ARRAY FOR SUM RATES IN FUTURE FOR MULTIPLE UAV-BS AGENTS IN FUTURE
-        for k in range(len(sum_rate_arr)):
-            comms += self.tx_power * sum_rate_arr[k]
-        #comms = self.tx_power * R_kn
+        #comms = 0
+        #for k in range(len(sum_rate_arr)):
+        #    comms += self.tx_power * sum_rate_arr[k]
+        comms = self.tx_power * R_kn
         energy_cons = travel + hover + avionics + comms
         return energy_cons
 
@@ -212,17 +213,20 @@ class UAV_LQDRL_Environment(gym.Env):
             hist_arr.append(hist)
         return hist_arr
 
+    # TODO: FIX COMMUNICATION MODEL
     def compute_awgn(self):
         return np.random.normal(0, 1)
 
     def compute_snr(self, tx_power, noise_power):
-        return 10 * np.log10(tx_power / noise_power**2 + 1e-9)
+        #return 10 * np.log10(tx_power / noise_power**2 + 1e-9)
+        return tx_power / noise_power
 
     # TODO: COMPUTE SUM RATE HERE 
     def compute_r_k(self, subchan_bw, snr):
         sum_rate_k = subchan_bw * np.log2(1 + snr)
         return sum_rate_k
 
+    # TODO: UPDATE THIS ONCE POWER COEFFICIENT IS COMPUTED PROPERLY
     def apply_power_allocation(self, scalar):
         return self.P_MAX * np.clip(scalar, 0.1, 1.0)
 
@@ -232,18 +236,34 @@ class UAV_LQDRL_Environment(gym.Env):
         for i, gu in enumerate(self.legit_users):
             gu.cluster_id = group_id
 
+    # TODO: COMPUTE THE FREE SPACE PATHLOSS AS IN PAPER HERE (SECTION V OF SILVIRIANTI)
+    # Takes distance between UAV-BS & GU, carrier frequency & speed of light as args
+    # CAN EITHER COMPUTE FOR ALL UAVs & GUs IN FUNCTION OR CALL MULTIPLE TIMES IN A LOOP
+    # WILL LIKELY GO FOR LATTER AS step() ITERATES OVER UAVs AND _compute_reward() WILL
+    def compute_pathloss(self, f_carrier, uav_pos, gu_pos):
+        dist = np.linalg.norm(uav_pos - gu_pos) 
+        fs_ploss = 20 * np.log10(dist) + 20 * np.log10(f_carrier) + 20 * np.log10((4 * np.pi) / 3e08)
+        return fs_ploss
+
+    # TODO: COMPUTE CHANNEL GAIN USING PATHLOSS & AWGN
+    def compute_channel_gain(self, pathloss, awgn):
+        g = self.compute_awgn()
+        h = pathloss * g
+        return h
+
     def compute_subcarrier_allocation(self, f_carrier):
         i = 0
         bw_arr = [0 for i in range(self.num_legit_users)]
         for gus in self.legit_users:
-            bw_arr[i] = (((i + 1) * f_carrier) - (i * f_carrier))
+            #bw_arr[i] = (((i + 1) * f_carrier) - (i * f_carrier))
+            bw_arr[i] = f_carrier / self.num_legit_users
             i += 1
         return bw_arr
 
     def compute_sum_rate(self, bw_arr, snr):
         sum_rate_arr = []
         for k in range(self.num_legit_users):
-            r_k = bw_arr[k] * np.log2(1 + snr)
+            r_k = bw_arr[k] * np.log2(1 + abs(snr))
             sum_rate_arr.append(r_k)
         return sum_rate_arr
 
@@ -288,8 +308,10 @@ class UAV_LQDRL_Environment(gym.Env):
             noise = self.compute_awgn()
             snr_legit = self.compute_snr(uav.tx_power, noise)
 
+            bw_arr = self.compute_subcarrier_allocation(self.f_carr)
             sum_rate_arr = self.compute_sum_rate(bw_arr, snr_legit)
             uav_energy_cons = uav.compute_energy_consumption(sum_rate_arr)
+            print("UAV Energy Consumption: ", uav_energy_cons) 
             uav.energy -= uav_energy_cons
 
             if uav_energy_cons > uav.prev_energy_consumption:
@@ -316,36 +338,42 @@ class UAV_LQDRL_Environment(gym.Env):
     def _compute_reward(self):
         bs = self.uavs[0]
         reward = 0
-        grant_reward = False
+        grant_reward = True
         noise = self.compute_awgn()
+        print("Noise: ", noise)
         snr_legit = self.compute_snr(bs.tx_power, noise)
         gu_positions = np.array([gu.position for gu in self.legit_users])
         centroid = np.mean(gu_positions, axis=0)
         distance_to_centroid = np.linalg.norm(bs.position - centroid)
         bs.prev_dist_to_centroid = distance_to_centroid
         bw_arr = self.compute_subcarrier_allocation(self.f_carr)
+        print("SNR Legit Links: ", snr_legit)
+        print("Bandwidths: ", bw_arr)
+        print("Transmit Power: ", bs.tx_power)
         sum_rate_arr = self.compute_sum_rate(bw_arr, snr_legit)
+        print("Sum Rates: ", sum_rate_arr)
         masr = np.sum(sum_rate_arr, axis=0)
         energy_consumption = bs.compute_energy_consumption(sum_rate_arr)
         bs.prev_energy_consumption = energy_consumption
         energy_eff = self._compute_energy_efficiency(masr, energy_consumption)
+        print("UAV Energy Efficiency: ", energy_eff)
 
         # Greater reward for more GUs achieving R_sum > R_min
         # Only grant reward if all secret key rates are above the minimum sum rate (i.e., for all k GUs)
         j = 0
         for k in range(self.num_legit_users):
             if sum_rate_arr[k] > self.R_MIN:
-                j += 1
-                if (k == 4 and j == 4):
-                    grant_reward = True
-                #reward += energy_eff 
+                #j += 1
+                #if (k == (self.num_legit_users - 1) and j == (self.num_legit_users - 1)):
+                #    grant_reward = True
+                reward += energy_eff 
             else:
                 grant_reward = False
                 #reward += 0 # No reward granted. Just placing this here to match the function even though it's redundant 
         #reward += energy_eff 
 
-        if grant_reward == True:
-            reward += energy_eff
+        #if grant_reward == True:
+        #    reward += energy_eff
 
         #if distance_to_centroid <= 10:
             #reward += 20
