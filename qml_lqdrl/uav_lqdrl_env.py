@@ -226,9 +226,18 @@ class UAV_LQDRL_Environment(gym.Env):
         sum_rate_k = subchan_bw * np.log2(1 + snr)
         return sum_rate_k
 
+    # TODO: COMPUTE POWER COEFFICIENT BASED ON CHANNEL GAIN
+    # RETURN 0 < DELTA <= 1 SCALED BASED ON NUMBER OF GUs & THEIR CHANNEL GAINS
+    def compute_power_coefficients(self, channel_gain):
+        delta = 0
+        return delta
+
     # TODO: UPDATE THIS ONCE POWER COEFFICIENT IS COMPUTED PROPERLY
-    def apply_power_allocation(self, scalar):
-        return self.P_MAX * np.clip(scalar, 0.1, 1.0)
+    # SCALAR MUST BE COMPUTED BASED ON GU CHANNEL GAIN (LARGER SCALAR FOR WEAKER GAIN)
+    def apply_power_allocation(self, pwr_coeff):
+        # TODO: UPDATE
+        # power = self.P_MAX * pwr_coeff
+        return self.P_MAX * np.clip(pwr_coeff, 0.1, 1.0)
 
     def apply_noma_grouping(self, action_scalar):
         # Example: 0.25 → Group 0, 0.75 → Group 3
