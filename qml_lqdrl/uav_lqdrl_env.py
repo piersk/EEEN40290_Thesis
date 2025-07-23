@@ -61,6 +61,7 @@ class UAV:
 
     # 100 J/s avionics power from d'Andrea et al (2014)
     #def compute_energy_consumption(self, num_uavs, sum_rate_arr, g=9.81, k=6.65, num_rotors=4, rho=1.225, theta=0.0507, Lambda=100):
+    # TODO: NORMALISE THE SUM RATE & CONVERT POWER TO LINEAR FROM dBm
     def compute_energy_consumption(self, tx_power_arr, sum_rate_arr, g=9.81, k=6.65, num_rotors=4, rho=1.225, theta=0.0507, Lambda=100):
         c_t = self.get_distance_travelled()
         c_t = abs(c_t)
@@ -72,9 +73,11 @@ class UAV:
         # TODO: REPLACE R_kn CONSTANT WITH COMPUTED SUM RATE FOR UAV-GU LINKS
         R_kn = 1.0
         # TODO: MAY REQUIRE A 2-D ARRAY FOR SUM RATES IN FUTURE FOR MULTIPLE UAV-BS AGENTS IN FUTURE
-        #comms = 0
+        comms = 0
         for k in range(len(sum_rate_arr)):
-            comms += tx_power_arr[k] * sum_rate_arr[k]
+            tx_power = 10**(tx_power_arr[k]/10)/1000
+            comms += tx_power * sum_rate_arr[k]
+            #comms += tx_power_arr[k] * sum_rate_arr[k]
         #comms = self.tx_power * R_kn
         energy_cons = travel + hover + avionics + comms
         return energy_cons
@@ -115,9 +118,11 @@ class UAV_LQDRL_Environment(gym.Env):
         self.num_uavs = 1
         self.num_legit_users = 4
 
+        #self.P_MAX = self.dbm_to_watt(30)
         self.P_MAX = 30
         self.E_MAX = 500e3  # 500kJ in paper
-        self.R_MIN = 0.75
+        #self.R_MIN = 0.75
+        self.R_MIN = 1e06
         self.V_MAX = 50     # 50 m/s in paper
         self.xmin, self.ymin, self.zmin = 0, 0, 10 
         self.xmax, self.ymax, self.zmax = 150, 150, 122
@@ -169,6 +174,9 @@ class UAV_LQDRL_Environment(gym.Env):
         uav_energy = np.array([self.uavs[0].energy], dtype=np.float32)
         #gu_centroid = np.mean([gu.position for gu in self.legit_users], axis=0)
         return np.concatenate([uav_pos, gu_pos, uav_energy]).astype(np.float32)
+
+    def dbm_to_watt(dbm):
+        return (10 ** ((dbm) / 10)) / 1000
 
     def compute_zeta(self, dist_to_centroid):
         zeta = 1 - ((self.xmax - dist_to_centroid) / (self.xmax - self.xmin))
@@ -231,12 +239,18 @@ class UAV_LQDRL_Environment(gym.Env):
     # RETURN 0 < DELTA <= 1 SCALED BASED ON NUMBER OF GUs & THEIR CHANNEL GAINS
     def compute_power_coefficients(self, channel_gain, channel_gain_arr):
         # Set minimum channel gain to 0.01
-        h_min = np.min(channel_gain_arr)
-        h_max = np.max(channel_gain_arr)
-        hnorm = (channel_gain - h_min) / (h_max - h_min)
+        h_tot = 0
+        for n in range(len(channel_gain_arr)):
+            h_tot += abs(channel_gain_arr[n])
+        #h_tot = np.sum(channel_gain_arr)
+        hnorm = abs(channel_gain) / h_tot
+        h_prop = 1 - hnorm
+        delta = (1 / (self.num_legit_users - 1)) * h_prop
+        #hnorm = (channel_gain - h_min) / (h_max - h_min)
         # Possible idea for scaling Tx power but for now will use the hnorm above
         #hnorm /= len(channel_gain_arr)
-        delta = 1 - hnorm 
+        #h_inv = 1/hnorm
+        #delta = 1 - abs(hnorm)
         return delta
 
     # TODO: UPDATE THIS ONCE POWER COEFFICIENT IS COMPUTED PROPERLY
@@ -324,18 +338,22 @@ class UAV_LQDRL_Environment(gym.Env):
             # PASS RESULTS FROM THIS TO COMPUTE ENERGY EFFICIENCY FUNCTION
             # CALL COMPUTE REWARD FUNCTION HERE TO DO THIS
             # CALCULATE REWARDS BASED ON ENERGY EFFICIENCY SUCH THAT SUM RATE IS MORE THAN THE MINIMUM DESIRABLE SUM RATE (ONLY ALLOCATE IF R_sum > R_min)
-            noise = self.compute_awgn()
+            #noise = self.compute_awgn()
             channel_gain_arr = []
             pwr_delta_arr = []
             awgn_arr = []
+            i = 0
             for gu in self.legit_users:
-                dist = np.linalg.norm(uav.position - gu.position)
                 uav_pos = uav.position
                 gu_pos = gu.position
                 pathloss = self.compute_pathloss(self.f_carr, uav_pos, gu_pos)
                 awgn = self.compute_awgn()
+                # Ensure the AWGN value is positive
+                awgn = np.sqrt(awgn**2)
                 awgn_arr.append(awgn)
-                channel_gain = self.compute(pathloss, awgn)
+                channel_gain = abs(self.compute_channel_gain(pathloss, awgn))
+                i += 1
+                print(f"GU {i} Channel Gain: ", channel_gain)
                 channel_gain_arr.append(channel_gain)
 
             tx_power_arr = []
@@ -343,20 +361,33 @@ class UAV_LQDRL_Environment(gym.Env):
             bw_arr = self.compute_subcarrier_allocation(self.f_carr)
             sum_rate_arr = []
             for k, gu in enumerate(self.legit_users):
+                print("=================================")
                 gain = channel_gain_arr[k]
                 pwr_delta = self.compute_power_coefficients(gain, channel_gain_arr)
+                print(f"Power scaling variable {k}: ", pwr_delta)
                 tx_power = self.compute_power_allocation(pwr_delta)
+                print(f"Transmit Power {k}: ", tx_power)
                 tx_power_arr.append(tx_power)
                 noise_kn = awgn_arr[k]
+                print(f"AWGN {k}: ", noise_kn)
                 snr_legit = self.compute_snr(tx_power, gain, noise_kn)
+                print(f"SNR {k}: ", snr_legit)
+                print(f"SNR {k}: ", 20 * np.log10(snr_legit), "dB")
                 snr_arr.append(snr_legit)
                 bw_subchan = bw_arr[k]
+                print(f"Subchannel Bandwidth {k}: ", bw_subchan, "Hz")
                 r_kn = self.compute_r_k(bw_subchan, snr_legit)
+                print(f"Data rate {k}: ", r_kn)
                 sum_rate_arr.append(r_kn)
 
             #sum_rate_arr = self.compute_sum_rate(bw_arr, snr_legit)
-        # Energy consumption should only occur once per step
-        uav_energy_cons = uav.compute_energy_consumption(tx_power_arr, sum_rate_arr)
+        # Energy consumption should only occur once per step for 1 UAV and once per UAV per step if multiple UAV-BSs are to be used
+        sum_rate_hz_arr = []
+        for i in range(len(sum_rate_arr)):
+            sum_rate_hz = (sum_rate_arr[i] / self.f_carr)
+            sum_rate_hz_arr.append(sum_rate_hz)
+
+        uav_energy_cons = uav.compute_energy_consumption(tx_power_arr, sum_rate_hz_arr)
         print("UAV Energy Consumption: ", uav_energy_cons) 
         uav.energy -= uav_energy_cons
 
@@ -364,7 +395,7 @@ class UAV_LQDRL_Environment(gym.Env):
             energy_cons_penalty += 0.1
 
         r_sum = np.sum(sum_rate_arr, axis=0)
-        reward = self._compute_reward()
+        reward = self._compute_reward(sum_rate_arr, uav_energy_cons)
         done = any(uav.energy <= 0 for uav in self.uavs)
         penalties = self.check_constraints()
         total_penalty = sum(v * p for v, p in zip(penalties.values(), [
@@ -383,23 +414,31 @@ class UAV_LQDRL_Environment(gym.Env):
     # Distance to GU centroid for clustering/grouping of GUs by the UAV-BS
     # Function to compute the reward allocated based on action a relative to a policy pi for a given state s
     # TODO: REWRITE FUNCTION TO ONLY COMPUTE REWARD AS EVERYTHING ELSE HANDLED IN step()
+    # TODO: POSSIBLY ALLOCATE SOME REWARDS FOR PROXIMITY TO GU CENTROID
     def _compute_reward(self, sum_rate_arr, energy_consumption):
-        # Compute reward for each of the UAVs
-        reward = 0
-        grant_reward = False
+        # Compute reward for the UAV agent
+        #reward = 0
+        #grant_reward = False
         masr = np.sum(sum_rate_arr, axis=0)
-        energy_eff = self.compute_energy_efficiency(masr, energy_consumption)
+        energy_eff = self._compute_energy_efficiency(masr, energy_consumption)
+        print("Energy Efficiency: ", energy_eff)
         j = 0
-        for k in range(self.num_legit_users):
-            # Normalising sum rate value to be between 0 and 1
-            sum_rate_norm = (sum_rate_arr[k] - np.min(sum_rate_arr)) / (np.max(sum_rate_arr) - np.min(sum_rate_arr))  
-            if sum_rate_norm > self.R_MIN:
+        for k in range(0, self.num_legit_users):
+            sum_rate = sum_rate_arr[k]
+            print(f"Sum Rate {k}: ", sum_rate)
+            if sum_rate > self.R_MIN:
                 j += 1
-                if k == (self.num_legit_users - 1) and k == j:
+                if k == (self.num_legit_users - 1) and k == (j - 1):
                     grant_reward = True
+                else:
+                    grant_reward = False
+
+        print("Reward Allocated: ", grant_reward)
 
         if grant_reward == True:
-            reward += energy_eff
+            reward = energy_eff
+        else:
+            reward = 0
 
         return reward
 
