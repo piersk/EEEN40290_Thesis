@@ -229,15 +229,20 @@ class UAV_LQDRL_Environment(gym.Env):
     # TODO: COMPUTE POWER COEFFICIENT BASED ON CHANNEL GAIN
     # RETURN 0 < DELTA <= 1 SCALED BASED ON NUMBER OF GUs & THEIR CHANNEL GAINS
     def compute_power_coefficients(self, channel_gain):
-        delta = 0
+        # Set minimum channel gain to 0.01
+        h_min = 0.01
+        h_max = 1
+        hnorm = (channel_gain - h_min) / (h_max - h_min)
+        delta = 1 - hnorm 
         return delta
 
     # TODO: UPDATE THIS ONCE POWER COEFFICIENT IS COMPUTED PROPERLY
     # SCALAR MUST BE COMPUTED BASED ON GU CHANNEL GAIN (LARGER SCALAR FOR WEAKER GAIN)
     def apply_power_allocation(self, pwr_coeff):
         # TODO: UPDATE
-        # power = self.P_MAX * pwr_coeff
-        return self.P_MAX * np.clip(pwr_coeff, 0.1, 1.0)
+        power_alloc = self.P_MAX * pwr_coeff
+        return power_alloc
+        #return self.P_MAX * np.clip(pwr_coeff, 0.1, 1.0)
 
     def apply_noma_grouping(self, action_scalar):
         # Example: 0.25 → Group 0, 0.75 → Group 3
@@ -251,7 +256,7 @@ class UAV_LQDRL_Environment(gym.Env):
     # WILL LIKELY GO FOR LATTER AS step() ITERATES OVER UAVs AND _compute_reward() WILL
     def compute_pathloss(self, f_carrier, uav_pos, gu_pos):
         dist = np.linalg.norm(uav_pos - gu_pos) 
-        fs_ploss = 20 * np.log10(dist) + 20 * np.log10(f_carrier) + 20 * np.log10((4 * np.pi) / 3e08)
+        fs_ploss = 20 * np.log10(dist) + 20 * np.log10(f_carrier) + 20 * np.log10((4 * np.pi) / 2.99e08)
         return fs_ploss
 
     # TODO: COMPUTE CHANNEL GAIN USING PATHLOSS & AWGN
