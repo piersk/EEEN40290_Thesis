@@ -355,13 +355,15 @@ class UAV_LQDRL_Environment(gym.Env):
                 sum_rate_arr.append(r_kn)
 
             #sum_rate_arr = self.compute_sum_rate(bw_arr, snr_legit)
-            uav_energy_cons = uav.compute_energy_consumption(tx_power_arr, sum_rate_arr)
-            print("UAV Energy Consumption: ", uav_energy_cons) 
-            uav.energy -= uav_energy_cons
+        # Energy consumption should only occur once per step
+        uav_energy_cons = uav.compute_energy_consumption(tx_power_arr, sum_rate_arr)
+        print("UAV Energy Consumption: ", uav_energy_cons) 
+        uav.energy -= uav_energy_cons
 
-            if uav_energy_cons > uav.prev_energy_consumption:
-                energy_cons_penalty += 0.1
+        if uav_energy_cons > uav.prev_energy_consumption:
+            energy_cons_penalty += 0.1
 
+        r_sum = np.sum(sum_rate_arr, axis=0)
         reward = self._compute_reward()
         done = any(uav.energy <= 0 for uav in self.uavs)
         penalties = self.check_constraints()
@@ -381,74 +383,23 @@ class UAV_LQDRL_Environment(gym.Env):
     # Distance to GU centroid for clustering/grouping of GUs by the UAV-BS
     # Function to compute the reward allocated based on action a relative to a policy pi for a given state s
     # TODO: REWRITE FUNCTION TO ONLY COMPUTE REWARD AS EVERYTHING ELSE HANDLED IN step()
-    def _compute_reward(self):
+    def _compute_reward(self, sum_rate_arr, energy_consumption):
         # Compute reward for each of the UAVs
         reward = 0
-        for uav in self.uavs:
-            grant_reward = False
-            noise = self.compute_awgn()
-            snr_legit = self.compute_snr(uav.tx_power, noise)
-            gu_positions = np.array([gu.position for gu in self.legit_users])
-            centroid = np.mean(gu_position, axis=0)
-            distance_to_centroid = np.linalg.norm(uav.position - centroid)
-            uav.prev_dist_to_centroid = distance_to_centroid
-            bw_arr = self.compute_subcarrier_allocation(self.f_carr)
-
-            print("SNR Legit Links: ", snr_legit)
-            print("Bandwidths: ", bw_arr)
-            print("Transmit Power: ", uav.tx_power)
-
-            sum_rate_arr = self.compute_sum_rate(bw_arr, snr_legit)
-            masr = np.sum(sum_rate_arr, axis=0)
-            energy_consumption = uav.compute_energy_consumption(sum_rate_arr)
-            uav.prev_energy_consumption = energy_consumption
-            energy_eff = self._compute_energy_efficiency(masr, energy_consumption)
-
-        '''
-        bs = self.uavs[0]
-        reward = 0
-        grant_reward = True
-        noise = self.compute_awgn()
-        print("Noise: ", noise)
-        snr_legit = self.compute_snr(bs.tx_power, noise)
-        gu_positions = np.array([gu.position for gu in self.legit_users])
-        centroid = np.mean(gu_positions, axis=0)
-        distance_to_centroid = np.linalg.norm(bs.position - centroid)
-        bs.prev_dist_to_centroid = distance_to_centroid
-        bw_arr = self.compute_subcarrier_allocation(self.f_carr)
-        print("SNR Legit Links: ", snr_legit)
-        print("Bandwidths: ", bw_arr)
-        print("Transmit Power: ", bs.tx_power)
-        sum_rate_arr = self.compute_sum_rate(bw_arr, snr_legit)
-        print("Sum Rates: ", sum_rate_arr)
+        grant_reward = False
         masr = np.sum(sum_rate_arr, axis=0)
-        energy_consumption = bs.compute_energy_consumption(sum_rate_arr)
-        bs.prev_energy_consumption = energy_consumption
-        energy_eff = self._compute_energy_efficiency(masr, energy_consumption)
-        print("UAV Energy Efficiency: ", energy_eff)
-        '''
-
-        # Greater reward for more GUs achieving R_sum > R_min
-        # Only grant reward if all secret key rates are above the minimum sum rate (i.e., for all k GUs)
+        energy_eff = self.compute_energy_efficiency(masr, energy_consumption)
         j = 0
         for k in range(self.num_legit_users):
-            if sum_rate_arr[k] > self.R_MIN:
-                #j += 1
-                #if (k == (self.num_legit_users - 1) and j == (self.num_legit_users - 1)):
-                #    grant_reward = True
-                reward += energy_eff 
-            else:
-                grant_reward = False
-                #reward += 0 # No reward granted. Just placing this here to match the function even though it's redundant 
-        #reward += energy_eff 
+            # Normalising sum rate value to be between 0 and 1
+            sum_rate_norm = (sum_rate_arr[k] - np.min(sum_rate_arr)) / (np.max(sum_rate_arr) - np.min(sum_rate_arr))  
+            if sum_rate_norm > self.R_MIN:
+                j += 1
+                if k == (self.num_legit_users - 1) and k == j:
+                    grant_reward = True
 
-        #if grant_reward == True:
-        #    reward += energy_eff
-
-        #if distance_to_centroid <= 10:
-            #reward += 20
-        #elif distance_to_centroid >= 50:
-        #    reward -= 10
+        if grant_reward == True:
+            reward += energy_eff
 
         return reward
 
