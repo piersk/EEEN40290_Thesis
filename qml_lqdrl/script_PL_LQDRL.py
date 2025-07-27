@@ -30,7 +30,8 @@ def plot_uav_trajectory(env, uav_trajectory, ep, t):
         ax.scatter(uav_position[0], uav_position[1], uav_position[2], label="UAV Positions", color="cyan")
     ax.scatter(*centroid, label="GU Centroid", color="red", marker="X", s=100)
     plt.legend()
-    plt.savefig(f'eg_plots/uav_trajectory_{ep}_timestep_{t}.png')
+    plt.savefig(f'eg_plots/test3/uav_trajectory_{ep}_timestep_{t}.png')
+    plt.close()
 
 # Importing modules required for experiments
 from uav_lqdrl_env import UAV_LQDRL_Environment
@@ -43,15 +44,19 @@ env = UAV_LQDRL_Environment()
 state_dim = env.observation_space.shape[0]
 action_dim = env.action_space.shape[0]
 
-actor = QuantumActor(n_qubits=state_dim, m_layers=3)
-critic = QuantumCritic(n_qubits=state_dim + action_dim, m_layers=3)
+#actor = QuantumActor(n_qubits=state_dim, m_layers=3)
+#critic = QuantumCritic(n_qubits=state_dim + action_dim, m_layers=3)
+actor = QuantumActor(n_qubits=state_dim, m_layers=1)
+critic = QuantumCritic(n_qubits=state_dim + action_dim, m_layers=1)
 
 buffer = ReplayBuffer()
 actor_opt = AdamOptimizer(stepsize=0.01)
 critic_opt = AdamOptimizer(stepsize=0.01)
 
-episodes = 2
-batch_size = 1
+episodes = 10
+batch_size = 8
+#episodes = 2
+#batch_size = 1
 gamma = 0.99
 
 time_step = 1
@@ -62,6 +67,7 @@ tot_reward_arr = []
 step_rewards_arr = []
 actor_losses = []
 critic_losses = []
+ep_distances_to_centroid = []
 
 uav_pos_arr = []
 
@@ -73,6 +79,7 @@ for ep in range(episodes):
     done = False
     total_reward = 0
     ep_uav_trajectory = []
+    dist_to_centroid_arr = []
     break_var = 0
 
     while not done:
@@ -93,6 +100,7 @@ for ep in range(episodes):
         print("GU Centroid Co-ordinates: ", gu_centroid)
 
         dist_to_centroid = np.linalg.norm(uav_pos - gu_centroid)
+        dist_to_centroid_arr.append(dist_to_centroid)
         print("Distance of UAV from GU Centroid: ", dist_to_centroid, "m")
 
         step_start_time = time.time()
@@ -149,22 +157,49 @@ for ep in range(episodes):
             actor_losses.append(actor_loss_val)
             time_var += time_step
         time_arr.append(time_var)
-        plot_uav_trajectory(env, ep_uav_trajectory, ep, i)
+        if i % 50 == 0 or done:
+            plot_uav_trajectory(env, ep_uav_trajectory, ep, i)
         step_end_time = time.time()
         step_time = step_start_time - step_end_time 
-        print(f"Time taken for step {i} to execute: ", step_time, " seconds")
+        print(f"Time taken for step {i} to execute: ", abs(step_time), " seconds")
         i += 1
         # Break out of episode early (for debugging purposes)
-        break_var += 1
-        if break_var >= 10:
-            break
+        #break_var += 1
+        #if break_var >= 22:
+        #    break
 
     ep_end_time = time.time()
     ep_time = ep_start_time - ep_end_time
-    print("Time taken for episode to execute: ", ep_time, " seconds")
+    print("Time taken for episode to execute: ", abs(ep_time), " seconds")
     plot_uav_trajectory(env, ep_uav_trajectory, ep, i)
     tot_reward_arr.append(total_reward)
-    print(f"Episode {ep} | Total reward: {total_reward:.2f}")
+    print(f"Episode {ep} | Total reward: {total_reward:.10f}")
     uav_pos_arr.append(ep_uav_trajectory)
+    ep_distances_to_centroid.append(dist_to_centroid_arr)
+
+# Plot rewards and losses
+plt.plot(total_rewards)
+plt.title("Total Reward per Episode")
+plt.xlabel("Episode")
+plt.ylabel("Total Reward")
+plt.savefig("eg_plots/test3/rewards_over_episodes.png")
+plt.close()
+
+plt.plot(actor_losses, label="Actor Loss")
+plt.plot(critic_losses, label="Critic Loss")
+plt.legend()
+plt.title("Actor and Critic Loss")
+plt.xlabel("Training Step")
+plt.ylabel("Loss")
+plt.savefig("eg_plots/test3/losses.png")
+plt.close()
+
+plt.plot(ep_distances_to_centroid, label="Distance of UAV-BS to Centroid")
+plt.legend()
+plt.title("UAV-BS Distances to GU Centroid Across Episodes")
+plt.xlabel("Distance")
+plt.ylabel("Time")
+plt.savefig("eg_plots/test3/distances_to_centroid.png")
+plt.close()
 
 print("All good so far")

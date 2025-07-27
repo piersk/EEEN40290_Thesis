@@ -71,11 +71,11 @@ class UAV:
         #term3 = Lambda * c_t / (self.velocity + 1e-6)
         avionics = Lambda * c_t / (self.velocity)
         # TODO: REPLACE R_kn CONSTANT WITH COMPUTED SUM RATE FOR UAV-GU LINKS
-        R_kn = 1.0
+        #R_kn = 1.0
         # TODO: MAY REQUIRE A 2-D ARRAY FOR SUM RATES IN FUTURE FOR MULTIPLE UAV-BS AGENTS IN FUTURE
         comms = 0
         for k in range(len(sum_rate_arr)):
-            tx_power = 10**(tx_power_arr[k]/10)/1000
+            #tx_power = 10**(tx_power_arr[k]/10)/1000
             comms += tx_power * sum_rate_arr[k]
             #comms += tx_power_arr[k] * sum_rate_arr[k]
         #comms = self.tx_power * R_kn
@@ -114,13 +114,14 @@ class UAV_LQDRL_Environment(gym.Env):
     def __init__(self):
         super().__init__()
         self.time = 0
-        self.delta_t = 1
+        self.delta_t = 10
         self.num_uavs = 1
         self.num_legit_users = 4
 
         #self.P_MAX = self.dbm_to_watt(30)
         self.P_MAX = 30
-        self.E_MAX = 500e3  # 500kJ in paper
+        #self.E_MAX = 500e3  # 500kJ in paper
+        self.E_MAX = 50e03 # Setting to 50kJ to speed up experiments for now
         #self.R_MIN = 0.75
         self.R_MIN = 1e06
         self.V_MAX = 50     # 50 m/s in paper
@@ -128,7 +129,7 @@ class UAV_LQDRL_Environment(gym.Env):
         self.xmax, self.ymax, self.zmax = 150, 150, 122
         # Penalty values are for scaling the reward based on constraint violations
         self.pwr_penalty = self.alt_penalty = self.range_penalty = \
-        self.min_rate_penalty = self.energy_penalty = self.velocity_penalty = 0.1
+        self.min_rate_penalty = self.energy_penalty = self.velocity_penalty = 0.15
 
         # TODO: DETERMINE APPROPRIATE CARRIER FREQUENCY
         # USE 1MHz PLACEHOLDER FOR NOW
@@ -205,14 +206,10 @@ class UAV_LQDRL_Environment(gym.Env):
             e_remain = uav.energy
         return e_remain 
 
-    '''
-    def get_uav_position(self):
-        position_arr = []
+    def get_energy_cons(self):
         for uav in self.uavs:
-            position = uav.position
-            position_arr.append(position)
-        return position_arr
-    '''
+            e_cons = abs(self.E_MAX - uav.energy)
+        return e_cons
 
     def get_uav_history(self):
         hist_arr = []
@@ -245,7 +242,8 @@ class UAV_LQDRL_Environment(gym.Env):
         #h_tot = np.sum(channel_gain_arr)
         hnorm = abs(channel_gain) / h_tot
         h_prop = 1 - hnorm
-        delta = (1 / (self.num_legit_users - 1)) * h_prop
+        #delta = (1 / (self.num_legit_users - 1)) * h_prop
+        delta = (1 / (self.num_legit_users)) * h_prop
         #hnorm = (channel_gain - h_min) / (h_max - h_min)
         # Possible idea for scaling Tx power but for now will use the hnorm above
         #hnorm /= len(channel_gain_arr)
@@ -315,6 +313,7 @@ class UAV_LQDRL_Environment(gym.Env):
     def step(self, action):
         action = np.clip(action, -1, 1)
         energy_cons_penalty = 0
+        reward_boost = 0
         for i, uav in enumerate(self.uavs):
             gu_positions = np.array([gu.position for gu in self.legit_users])
             gu_centroid = self._compute_gu_centroid(gu_positions)
@@ -346,6 +345,7 @@ class UAV_LQDRL_Environment(gym.Env):
             for gu in self.legit_users:
                 uav_pos = uav.position
                 gu_pos = gu.position
+                dist_from_gu = np.linalg.norm(uav_pos - gu_pos)
                 pathloss = self.compute_pathloss(self.f_carr, uav_pos, gu_pos)
                 awgn = self.compute_awgn()
                 # Ensure the AWGN value is positive
@@ -355,11 +355,14 @@ class UAV_LQDRL_Environment(gym.Env):
                 i += 1
                 print(f"GU {i} Channel Gain: ", channel_gain)
                 channel_gain_arr.append(channel_gain)
+                print(f"Distance between UAV & GU {i}: ", dist_from_gu, " m")
 
             tx_power_arr = []
             snr_arr = []
             bw_arr = self.compute_subcarrier_allocation(self.f_carr)
             sum_rate_arr = []
+            # TODO: COMPUTE ALL TX_POWER COEFFICIENTS IN ONE GO AND SORT AS AN ARRAY
+            # SORT GAIN ARRAY IN ASCENDING ORDER AND REVERSE THIS LIST TO USE IT AS DELTA_ARR
             for k, gu in enumerate(self.legit_users):
                 print("=================================")
                 gain = channel_gain_arr[k]
@@ -388,14 +391,20 @@ class UAV_LQDRL_Environment(gym.Env):
             sum_rate_hz_arr.append(sum_rate_hz)
 
         uav_energy_cons = uav.compute_energy_consumption(tx_power_arr, sum_rate_hz_arr)
-        print("UAV Energy Consumption: ", uav_energy_cons) 
+        print("UAV Energy Consumption: ", uav_energy_cons)
         uav.energy -= uav_energy_cons
 
         if uav_energy_cons > uav.prev_energy_consumption:
             energy_cons_penalty += 0.1
+        else:
+            energy_cons_penalty = 0
+
+        if dist_to_centroid <= 30 and dist_to_centroid >= self.zmax:
+            reward_boost += 0.2
 
         r_sum = np.sum(sum_rate_arr, axis=0)
         reward = self._compute_reward(sum_rate_arr, uav_energy_cons)
+        reward += reward_boost * reward
         done = any(uav.energy <= 0 for uav in self.uavs)
         penalties = self.check_constraints()
         total_penalty = sum(v * p for v, p in zip(penalties.values(), [
@@ -417,8 +426,8 @@ class UAV_LQDRL_Environment(gym.Env):
     # TODO: POSSIBLY ALLOCATE SOME REWARDS FOR PROXIMITY TO GU CENTROID
     def _compute_reward(self, sum_rate_arr, energy_consumption):
         # Compute reward for the UAV agent
-        #reward = 0
-        #grant_reward = False
+        reward = 0
+        grant_reward = False
         masr = np.sum(sum_rate_arr, axis=0)
         energy_eff = self._compute_energy_efficiency(masr, energy_consumption)
         print("Energy Efficiency: ", energy_eff)
@@ -430,15 +439,11 @@ class UAV_LQDRL_Environment(gym.Env):
                 j += 1
                 if k == (self.num_legit_users - 1) and k == (j - 1):
                     grant_reward = True
-                else:
-                    grant_reward = False
 
         print("Reward Allocated: ", grant_reward)
 
         if grant_reward == True:
             reward = energy_eff
-        else:
-            reward = 0
 
         return reward
 
