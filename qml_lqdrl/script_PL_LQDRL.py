@@ -1,4 +1,6 @@
+#script_PL_LQDRL.py
 import jax
+import jax.numpy as jnp
 import pennylane as qml
 from pennylane import numpy as np
 from pennylane import draw
@@ -9,6 +11,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 import gymnasium as gym
+#import optax
 from collections import deque
 import random
 import time
@@ -30,7 +33,7 @@ def plot_uav_trajectory(env, uav_trajectory, ep, t):
         ax.scatter(uav_position[0], uav_position[1], uav_position[2], label="UAV Positions", color="cyan")
     ax.scatter(*centroid, label="GU Centroid", color="red", marker="X", s=100)
     plt.legend()
-    plt.savefig(f'eg_plots/test3/uav_trajectory_{ep}_timestep_{t}.png')
+    plt.savefig(f'eg_plots/test17/uav_trajectory_{ep}_timestep_{t}.png')
     plt.close()
 
 # Importing modules required for experiments
@@ -46,18 +49,25 @@ action_dim = env.action_space.shape[0]
 
 #actor = QuantumActor(n_qubits=state_dim, m_layers=3)
 #critic = QuantumCritic(n_qubits=state_dim + action_dim, m_layers=3)
-actor = QuantumActor(n_qubits=state_dim, m_layers=1)
-critic = QuantumCritic(n_qubits=state_dim + action_dim, m_layers=1)
+actor = QuantumActor(n_qubits=state_dim, m_layers=3)
+critic = QuantumCritic(n_qubits=state_dim + action_dim, m_layers=3)
 
 buffer = ReplayBuffer()
 actor_opt = AdamOptimizer(stepsize=0.01)
 critic_opt = AdamOptimizer(stepsize=0.01)
 
-episodes = 10
-batch_size = 8
+#actor_opt = optax.adam(learning_rate=0.01)
+#critic_opt = optax.adam(learning_rate=0.01)
+
+#actor_opt_state = actor_optimizer.init(actor.theta)
+#critic_opt_state = critic_optimizer.init(critic.theta)
+
+episodes = 5
+batch_size = 32
 #episodes = 2
 #batch_size = 1
 gamma = 0.99
+max_act_scale = 1e14
 
 time_step = 1
 
@@ -104,9 +114,14 @@ for ep in range(episodes):
         print("Distance of UAV from GU Centroid: ", dist_to_centroid, "m")
 
         step_start_time = time.time()
-        state_tensor = np.array(state, requires_grad=False)
+        #state_tensor = np.array(state, requires_grad=False)
+        state_tensor = jnp.array(state)
         action = actor(state_tensor)
+        print("Action: ", action)
+        action = jnp.tanh(jnp.array(action)) * max_act_scale
+        print("Action Scaled along Hyperbolic Tangent: ", action)
         action = np.clip(np.array(action), -1, 1)
+        print("Clipped Action: ", action)
 
         next_state, reward, done, _, _ = env.step(action)
         buffer.push(state, action, reward, next_state, done)
@@ -123,14 +138,17 @@ for ep in range(episodes):
                 critic.update_params(theta)
                 loss = 0
                 for s, a, r, ns, d in zip(states, actions, rewards, next_states, dones):
-                    sa = np.concatenate([s, a])
-                    q_val = critic(sa)
+                    #sa = np.concatenate([s, a])
+                    sa = jnp.concatenate([jnp.array(s), jnp.array(a)])
+                    #q_val = critic(jnp.array(sa))
+                    q_val = critic.qnode(jnp.array(sa), theta)
                     q_val = critic.decode_op(q_val)
                     print("Critic Q-Value: ", q_val)
 
-                    na = actor(ns)
-                    nsa = np.concatenate([ns, na])
-                    q_val_next = critic(nsa)
+                    na = actor(jnp.array(ns))
+                    nsa = jnp.concatenate([jnp.array(ns), jnp.array(na)])
+                    #q_val_next = critic(nsa)
+                    q_val_next = critic.qnode(jnp.array(sa), theta)
                     q_val_next = critic.decode_op(q_val_next)
 
                     target = r + gamma * q_val_next * (1 - d)
@@ -145,8 +163,10 @@ for ep in range(episodes):
                 actor.update_params(theta)
                 loss = 0
                 for s in states:
-                    a = actor(s)
-                    sa = np.concatenate([s, a])
+                    print("Actor Theta Shape: ", theta.shape)
+                    a = actor(jnp.array(s), theta)
+                    print("Actor Output: ", a)
+                    sa = jnp.concatenate([jnp.array(s), jnp.array(a)])
                     q_val = critic(sa)
                     q_val = critic.decode_op(q_val)
                     print("Actor Q-Value: ", q_val)
@@ -155,18 +175,20 @@ for ep in range(episodes):
 
             actor.theta, actor_loss_val = actor_opt.step_and_cost(actor_loss, actor.theta)
             actor_losses.append(actor_loss_val)
+            g = grad(actor_loss)(actor.theta)
+            print("Computed Gradient: ", g)
             time_var += time_step
         time_arr.append(time_var)
-        if i % 50 == 0 or done:
+        if i % 5 == 0 or done:
             plot_uav_trajectory(env, ep_uav_trajectory, ep, i)
         step_end_time = time.time()
         step_time = step_start_time - step_end_time 
         print(f"Time taken for step {i} to execute: ", abs(step_time), " seconds")
         i += 1
         # Break out of episode early (for debugging purposes)
-        #break_var += 1
-        #if break_var >= 22:
-        #    break
+        break_var += 1
+        if break_var >= 50:
+            break
 
     ep_end_time = time.time()
     ep_time = ep_start_time - ep_end_time
@@ -178,28 +200,29 @@ for ep in range(episodes):
     ep_distances_to_centroid.append(dist_to_centroid_arr)
 
 # Plot rewards and losses
-plt.plot(total_rewards)
+#plt.plot(total_rewards)
+plt.plot(tot_reward_arr)
 plt.title("Total Reward per Episode")
 plt.xlabel("Episode")
 plt.ylabel("Total Reward")
-plt.savefig("eg_plots/test3/rewards_over_episodes.png")
+plt.savefig("eg_plots/test17/rewards_over_episodes.png")
 plt.close()
 
-plt.plot(actor_losses, label="Actor Loss")
-plt.plot(critic_losses, label="Critic Loss")
+plt.plot(np.arange(0, len(actor_losses), 1), actor_losses, label="Actor Loss")
+plt.plot(np.arange(0, len(actor_losses), 1), critic_losses, label="Critic Loss")
 plt.legend()
 plt.title("Actor and Critic Loss")
 plt.xlabel("Training Step")
 plt.ylabel("Loss")
-plt.savefig("eg_plots/test3/losses.png")
+plt.savefig("eg_plots/test17/losses.png")
 plt.close()
 
 plt.plot(ep_distances_to_centroid, label="Distance of UAV-BS to Centroid")
-plt.legend()
+#plt.legend()
 plt.title("UAV-BS Distances to GU Centroid Across Episodes")
 plt.xlabel("Distance")
 plt.ylabel("Time")
-plt.savefig("eg_plots/test3/distances_to_centroid.png")
+plt.savefig("eg_plots/test17/distances_to_centroid.png")
 plt.close()
 
 print("All good so far")

@@ -47,11 +47,24 @@ class UAV:
         self.zeta = 1   # Default zeta value = 1
 
     # Function to move UAV in 3-D Cartesian Space
-    def move(self, delta_pos):
+    def move(self, delta_pos, dist):
         self.position += delta_pos
+        print("Change in UAV Position: ", delta_pos)
         if (self.position[2] <= 0):
             self.position[2] = 0
-        self.velocity = np.linalg.norm(delta_pos)
+        if (self.position[2] > 122):
+            self.position[2] = 122
+        if (self.position[1] <= 0):
+            self.position[1] = 0
+        if (self.position[1] > 150):
+            self.position[1] = 150
+        if (self.position[0] <= 0):
+            self.position[0] = 0
+        if (self.position[0] > 150):
+            self.position[0] = 150
+        #self.velocity = np.linalg.norm(delta_pos)
+        self.velocity = dist
+        print("UAV Velocity: ", self.velocity)
         self.history.append(self.position.copy())
 
     def get_distance_travelled(self):
@@ -76,6 +89,7 @@ class UAV:
         comms = 0
         for k in range(len(sum_rate_arr)):
             #tx_power = 10**(tx_power_arr[k]/10)/1000
+            tx_power = tx_power_arr[k]
             comms += tx_power * sum_rate_arr[k]
             #comms += tx_power_arr[k] * sum_rate_arr[k]
         #comms = self.tx_power * R_kn
@@ -114,7 +128,7 @@ class UAV_LQDRL_Environment(gym.Env):
     def __init__(self):
         super().__init__()
         self.time = 0
-        self.delta_t = 10
+        self.delta_t = 1
         self.num_uavs = 1
         self.num_legit_users = 4
 
@@ -187,6 +201,7 @@ class UAV_LQDRL_Environment(gym.Env):
     # Zeta must be computed as a variable between 0 and 1 to scale against V_MAX
     def compute_velocity(self, zeta):
         v = zeta * self.V_MAX
+        print("UAV Velocity: ", v, " m/s")
         return v
 
     # TODO: COMPUTE POLAR ANGLE CONSANTS FOR UAV TO MOVE UP, DOWN, LEFT & RIGHT 
@@ -277,6 +292,7 @@ class UAV_LQDRL_Environment(gym.Env):
     # TODO: COMPUTE CHANNEL GAIN USING PATHLOSS & AWGN
     def compute_channel_gain(self, pathloss, awgn):
         h = pathloss * awgn
+        #h = (1/pathloss) * awgn
         return h
 
     def compute_subcarrier_allocation(self, f_carrier):
@@ -321,14 +337,15 @@ class UAV_LQDRL_Environment(gym.Env):
             dist_to_centroid = np.linalg.norm(uav.position - gu_centroid)
             # TODO: IMPLEMENT BETTER STEERING IN Z-AXIS & XY-PLANE
             # Only slow down speed when reasonably close to the GU centroid
-            if dist_to_centroid <= 25:
+            if dist_to_centroid <= 100:
                 zeta = self.compute_zeta(dist_to_centroid)
             else:
                 zeta = 1
+            #zeta =self.compute_zeta(dist_to_centroid)
             dist = self.compute_velocity(zeta) * self.delta_t
             #delta = action[i*3:(i+1)*3] * v
             delta = action[:3] * dist
-            uav.move(delta)
+            uav.move(delta, dist)
 
             # TODO: ADD SUBCHANNEL BWS TO ARRAY HERE FOR UAVs & GUs
             # NB: THIS WAS DONE IN _compute_reward()
@@ -363,13 +380,24 @@ class UAV_LQDRL_Environment(gym.Env):
             sum_rate_arr = []
             # TODO: COMPUTE ALL TX_POWER COEFFICIENTS IN ONE GO AND SORT AS AN ARRAY
             # SORT GAIN ARRAY IN ASCENDING ORDER AND REVERSE THIS LIST TO USE IT AS DELTA_ARR
+            '''
+            pwr_delta_arr = []
+            channel_gain_arr.sort()
+            for k in range(self.num_legit_users):
+                gain = channel_gain_arr[k]
+                pwr_delta = self.compute_power_coefficients(gain, channel_gain_arr)
+                pwr_delta_arr.append(pwr_delta)
+            pwr_delta_arr.sort(reverse=True)
+            '''
+
             for k, gu in enumerate(self.legit_users):
                 print("=================================")
                 gain = channel_gain_arr[k]
                 pwr_delta = self.compute_power_coefficients(gain, channel_gain_arr)
                 print(f"Power scaling variable {k}: ", pwr_delta)
+                #tx_power = self.compute_power_allocation(pwr_delta_arr[k])
                 tx_power = self.compute_power_allocation(pwr_delta)
-                print(f"Transmit Power {k}: ", tx_power)
+                print(f"Transmit Power {k}: ", tx_power, "dBm")
                 tx_power_arr.append(tx_power)
                 noise_kn = awgn_arr[k]
                 print(f"AWGN {k}: ", noise_kn)
@@ -399,12 +427,14 @@ class UAV_LQDRL_Environment(gym.Env):
         else:
             energy_cons_penalty = 0
 
-        if dist_to_centroid <= 30 and dist_to_centroid >= self.zmax:
-            reward_boost += 0.2
+        if dist_to_centroid <= 30 and dist_to_centroid >= self.zmin:
+            reward_boost += 0.5
 
         r_sum = np.sum(sum_rate_arr, axis=0)
         reward = self._compute_reward(sum_rate_arr, uav_energy_cons)
         reward += reward_boost * reward
+        if not (dist_to_centroid <= 30 and dist_to_centroid >= self.zmin):
+            energy_cons_penalty += 0.2
         done = any(uav.energy <= 0 for uav in self.uavs)
         penalties = self.check_constraints()
         total_penalty = sum(v * p for v, p in zip(penalties.values(), [
@@ -412,6 +442,7 @@ class UAV_LQDRL_Environment(gym.Env):
             self.min_rate_penalty, self.energy_penalty, self.velocity_penalty
         ]))
         reward -= reward * (total_penalty + energy_cons_penalty)
+        print("Reward for step: ", reward)
         
         return self._get_obs(), reward, done, False, {}
 
