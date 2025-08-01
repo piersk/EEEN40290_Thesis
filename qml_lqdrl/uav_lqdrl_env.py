@@ -290,6 +290,8 @@ class UAV_LQDRL_Environment(gym.Env):
         return fs_ploss
 
     # TODO: COMPUTE CHANNEL GAIN USING PATHLOSS & AWGN
+    # POTENTIAL UPDATE REQUIRED HERE AS GAIN SCALES POSITIVELY WITH PATHLOSS WHICH MAKES NO SENSE TO ME AT PRESENT
+    # MAY HAVE TO USE CHANNEL GAIN MODEL FROM ZHANG ET AL (2025) AS IT MAKES MORE SENSE (CHANNEL GAIN IS INVERSELY PROPORTIONAL TO DISTANCE BETWEEN UAV & GU)
     def compute_channel_gain(self, pathloss, awgn):
         h = pathloss * awgn
         #h = (1/pathloss) * awgn
@@ -433,8 +435,8 @@ class UAV_LQDRL_Environment(gym.Env):
         r_sum = np.sum(sum_rate_arr, axis=0)
         reward = self._compute_reward(sum_rate_arr, uav_energy_cons)
         reward += reward_boost * reward
-        if not (dist_to_centroid <= 30 and dist_to_centroid >= self.zmin):
-            energy_cons_penalty += 0.2
+        #if not (dist_to_centroid <= 30 and dist_to_centroid >= self.zmin):
+        #    energy_cons_penalty += 0.2
         done = any(uav.energy <= 0 for uav in self.uavs)
         penalties = self.check_constraints()
         total_penalty = sum(v * p for v, p in zip(penalties.values(), [
@@ -466,7 +468,7 @@ class UAV_LQDRL_Environment(gym.Env):
         for k in range(0, self.num_legit_users):
             sum_rate = sum_rate_arr[k]
             print(f"Sum Rate {k}: ", sum_rate)
-            if sum_rate > self.R_MIN:
+            if sum_rate / (self.f_carr / self.num_legit_users) > self.R_MIN / self.f_carr:
                 j += 1
                 if k == (self.num_legit_users - 1) and k == (j - 1):
                     grant_reward = True

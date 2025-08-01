@@ -3,6 +3,7 @@ import pennylane as qml
 import jax
 import jax.numpy as jnp
 from pennylane import numpy as np
+import optax
 
 class QuantumActor:
     def __init__(self, n_qubits, m_layers):
@@ -26,7 +27,8 @@ class QuantumActor:
                     qml.RY(theta[l][i], wires=i)
             return [qml.expval(qml.PauliZ(i)) for i in range(n_qubits)]
 
-        self.qnode = circuit
+        #self.qnode = circuit
+        self.qnode = jax.jit(circuit)
 
     def __call__(self, x, theta=None):
         theta = theta if theta is not None else self.theta
@@ -64,7 +66,8 @@ class QuantumCritic:
                     qml.RY(theta[l][i], wires=i)
             return [qml.expval(qml.PauliZ(i)) for i in range(n_qubits)]
 
-        self.qnode = circuit
+        #self.qnode = circuit
+        self.qnode = jax.jit(circuit)
 
     def __call__(self, x, theta=None):
         theta = theta if theta is not None else self.theta
