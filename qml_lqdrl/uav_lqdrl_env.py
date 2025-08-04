@@ -9,6 +9,8 @@
 import numpy as np
 import gymnasium as gym
 from gymnasium import spaces
+from scipy.stats import rice
+from scipy.special import iv
 
 # TODO: Update the UAVs & GUs for this to only include the Legitimate GUs (no subclasses required for this prototype) 
 # Do not consider secrecy for this model
@@ -50,8 +52,8 @@ class UAV:
     def move(self, delta_pos, dist):
         self.position += delta_pos
         print("Change in UAV Position: ", delta_pos)
-        if (self.position[2] <= 0):
-            self.position[2] = 0
+        if (self.position[2] < 10):
+            self.position[2] = 10
         if (self.position[2] > 122):
             self.position[2] = 122
         if (self.position[1] <= 0):
@@ -131,6 +133,8 @@ class UAV_LQDRL_Environment(gym.Env):
         self.delta_t = 1
         self.num_uavs = 1
         self.num_legit_users = 4
+        self.K_FACTOR = 10
+        self.SHADOWING_SIGMA = 4
 
         #self.P_MAX = self.dbm_to_watt(30)
         self.P_MAX = 30
@@ -289,6 +293,48 @@ class UAV_LQDRL_Environment(gym.Env):
         fs_ploss = 20 * np.log10(dist) + 20 * np.log10(f_carrier) + 20 * np.log10((4 * np.pi) / 2.99e08)
         return fs_ploss
 
+    # TODO: EXPERIMENT WITH THIS CHANNEL MODEL 
+    # ENSURE THAT THE GAIN IS BEING COMPUTED CORRECTLY
+
+    def rician_channel_gain(self, distance):
+        """Compute Rician fading channel gain in linear scale"""
+        #K_lin = 10 ** (self.K_FACTOR / 10)
+        K_lin = self.K_FACTOR
+        
+        # Calculate free space path loss in dB
+        wavelength = 3e8 / self.f_carr
+        fspl_db = 20 * np.log10(4 * np.pi * distance / wavelength)
+        
+        # Generate Rician fading component (linear scale)
+        b = np.sqrt(K_lin / (K_lin + 1))
+        scale = np.sqrt(1 / (2 * (K_lin + 1)))
+        fading = rice.rvs(b, scale=scale)
+        
+        # Shadowing in dB
+        shadowing_db = np.random.normal(0, self.SHADOWING_SIGMA)
+        
+        # Total channel gain in dB
+        gain_db = fspl_db + 20 * np.log10(fading) + shadowing_db
+        
+        # Convert to linear scale
+        #return gain_db
+        return 10 ** (gain_db / 20)  # Amplitude gain
+    
+
+    '''
+    def rician_channel_gain(self, distance, pathloss):
+        #K_lin = 10**(self.K_FACTOR/10)
+        b = np.sqrt(self.K_FACTOR / (self.K_FACTOR + 1))
+        #b = np.sqrt(K_lin / (K_lin + 1))
+        #scale = np.sqrt(1 / (2 * (K_lin + 1)))
+        scale = np.sqrt(1 / (2 * (self.K_FACTOR + 1)))
+        fading = rice.rvs(b=b, scale=scale)
+        shadowing = np.random.normal(0, self.SHADOWING_SIGMA)
+        gain_db = 20 * np.log10(fading) + shadowing - pathloss
+        h = 10**(gain_db/10)
+        return h
+    '''
+
     # TODO: COMPUTE CHANNEL GAIN USING PATHLOSS & AWGN
     # POTENTIAL UPDATE REQUIRED HERE AS GAIN SCALES POSITIVELY WITH PATHLOSS WHICH MAKES NO SENSE TO ME AT PRESENT
     # MAY HAVE TO USE CHANNEL GAIN MODEL FROM ZHANG ET AL (2025) AS IT MAKES MORE SENSE (CHANNEL GAIN IS INVERSELY PROPORTIONAL TO DISTANCE BETWEEN UAV & GU)
@@ -365,12 +411,14 @@ class UAV_LQDRL_Environment(gym.Env):
                 uav_pos = uav.position
                 gu_pos = gu.position
                 dist_from_gu = np.linalg.norm(uav_pos - gu_pos)
-                pathloss = self.compute_pathloss(self.f_carr, uav_pos, gu_pos)
+                #pathloss = self.compute_pathloss(self.f_carr, uav_pos, gu_pos)
                 awgn = self.compute_awgn()
                 # Ensure the AWGN value is positive
                 awgn = np.sqrt(awgn**2)
                 awgn_arr.append(awgn)
-                channel_gain = abs(self.compute_channel_gain(pathloss, awgn))
+                #channel_gain = abs(self.compute_channel_gain(pathloss, awgn))
+                #channel_gain = self.rician_channel_gain(dist_from_gu, pathloss)
+                channel_gain = self.rician_channel_gain(dist_from_gu)
                 i += 1
                 print(f"GU {i} Channel Gain: ", channel_gain)
                 channel_gain_arr.append(channel_gain)
@@ -400,6 +448,8 @@ class UAV_LQDRL_Environment(gym.Env):
                 #tx_power = self.compute_power_allocation(pwr_delta_arr[k])
                 tx_power = self.compute_power_allocation(pwr_delta)
                 print(f"Transmit Power {k}: ", tx_power, "dBm")
+                tx_power = dbm_to_watt(tx_power)
+                print(f"Transmit Power {k}: ", tx_power, "W")
                 tx_power_arr.append(tx_power)
                 noise_kn = awgn_arr[k]
                 print(f"AWGN {k}: ", noise_kn)
@@ -410,7 +460,7 @@ class UAV_LQDRL_Environment(gym.Env):
                 bw_subchan = bw_arr[k]
                 print(f"Subchannel Bandwidth {k}: ", bw_subchan, "Hz")
                 r_kn = self.compute_r_k(bw_subchan, snr_legit)
-                print(f"Data rate {k}: ", r_kn)
+                print(f"Data rate {k}: ", r_kn, "bps")
                 sum_rate_arr.append(r_kn)
 
             #sum_rate_arr = self.compute_sum_rate(bw_arr, snr_legit)

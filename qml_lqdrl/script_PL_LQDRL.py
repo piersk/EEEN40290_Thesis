@@ -33,8 +33,11 @@ def plot_uav_trajectory(env, uav_trajectory, ep, t):
         ax.scatter(uav_position[0], uav_position[1], uav_position[2], label="UAV Positions", color="cyan")
     ax.scatter(*centroid, label="GU Centroid", color="red", marker="X", s=100)
     plt.legend()
-    plt.savefig(f'eg_plots/test24/uav_trajectory_{ep}_timestep_{t}.png')
+    plt.savefig(f'eg_plots/test33/uav_trajectory_{ep}_timestep_{t}.png')
     plt.close()
+
+def gradient_norm(grad):
+    return jnp.sqrt(sum([jnp.sum(jnp.square(g)) for g in grad]))
 
 # Importing modules required for experiments
 from uav_lqdrl_env import UAV_LQDRL_Environment
@@ -63,7 +66,7 @@ critic_opt = optax.adam(learning_rate=0.01)
 actor_opt_state = actor_opt.init(actor.theta)
 critic_opt_state = critic_opt.init(critic.theta)
 
-episodes = 20
+episodes = 2
 batch_size = 30
 #episodes = 2
 #batch_size = 1
@@ -77,6 +80,7 @@ time_arr = []
 
 tot_reward_arr = []
 step_rewards_arr = []
+rewards_across_eps_arr = []
 actor_losses = []
 critic_losses = []
 ep_distances_to_centroid = []
@@ -173,6 +177,27 @@ for ep in range(episodes):
             actor_losses.append(actor_loss(actor.theta))
             critic_losses.append(critic_loss(critic.theta))
 
+            '''
+            critic_grads = jax.grad(critic_loss)(critic.theta)
+            print(f"Episode {ep} Step {time_var} Critic Gradients: ", critic_grads)
+            print(f"Critic Grad Norm: {gradient_norm(critic_grads)}")
+
+            actor_grads = jax.grad(actor_loss)(actor.theta)
+            print(f"Episode {ep} Step {time_var} Actor Gradients: ", actor_grads)
+            print(f"Actor Grad Norm: {gradient_norm(actor_grads)}")
+
+            with open("output_files/gradients_out_test35.log", "a") as f:
+                f.write(f"Episode {ep}, Step {i}\n")
+                f.write("Critic Gradients:\n")
+                f.write("Mean & Standard Deviation:\n")
+                for layer in critic_grads:
+                    f.write(f"{jnp.mean(layer):.6f} ± {jnp.std(layer):.6f}\n")
+                f.write("Actor Gradients:\n")
+                f.write("Mean & Standard Deviation:\n")
+                for layer in actor_grads:
+                    f.write(f"{jnp.mean(layer):.6f} ± {jnp.std(layer):.6f}\n\n")
+                f.close()
+            '''
             #actor.theta, actor_loss_val = actor_opt.step_and_cost(actor_loss, actor.theta)
             #actor_losses.append(actor_loss_val)
             #g = grad(actor_loss)(actor.theta)
@@ -198,6 +223,7 @@ for ep in range(episodes):
     print(f"Episode {ep} | Total reward: {total_reward:.10f}")
     uav_pos_arr.append(ep_uav_trajectory)
     ep_distances_to_centroid.append(dist_to_centroid_arr)
+    rewards_across_eps_arr.append(step_rewards_arr)
 
 # Plot rewards and losses
 #plt.plot(total_rewards)
@@ -205,7 +231,7 @@ plt.plot(tot_reward_arr)
 plt.title("Total Reward per Episode")
 plt.xlabel("Episode")
 plt.ylabel("Total Reward")
-plt.savefig("eg_plots/test24/rewards_over_episodes.png")
+plt.savefig("eg_plots/test33/rewards_over_episodes.png")
 plt.close()
 
 plt.plot(actor_losses, label="Actor Loss")
@@ -214,21 +240,49 @@ plt.legend()
 plt.title("Actor and Critic Loss")
 plt.xlabel("Training Step")
 plt.ylabel("Loss")
-plt.savefig("eg_plots/test24/losses.png")
+plt.savefig("eg_plots/test33/losses.png")
 plt.close()
 
-fig, ax = plt.subplots(5, 4, figsize=(20, 16))
+#fig, ax = plt.subplots(5, 4, figsize=(20, 16))
+fig, ax = plt.subplots(2, 1, figsize=(20, 16))
 idx = 0
-for i in range(5):
-    for j in range(4):
+for i in range(1):
+    for j in range(2):
+        '''
         ax[i, j].plot(ep_distances_to_centroid[idx], label=f"Episode {idx} Distance of UAV-BS to Centroid")
         ax[i, j].set_ylabel("Distance") 
         ax[i, j].set_xlabel("Time")
         ax[i, j].set_title(f"Episode {idx}")
+        '''
+        ax[idx].plot(ep_distances_to_centroid[idx], label=f"Episode {idx} Distance of UAV-BS to Centroid")
+        ax[idx].set_ylabel("Distance") 
+        ax[idx].set_xlabel("Time")
+        ax[idx].set_title(f"Episode {idx}")
         idx += 1
 fig.suptitle("UAV-BS Distances to GU Centroid Across Episodes")
 plt.tight_layout()
-plt.savefig("eg_plots/test24/distances_to_centroid.png")
+plt.savefig("eg_plots/test33/distances_to_centroid.png")
+plt.close()
+
+#fig, ax = plt.subplots(5, 4, figsize=(20, 16))
+fig, ax = plt.subplots(2, 1, figsize=(20, 16))
+idx = 0
+for i in range(1):
+    for j in range(2):
+        '''
+        ax[i, j].plot(rewards_across_eps_arr[idx], label=f"Episode {idx} Rewards")
+        ax[i, j].set_ylabel("Reward") 
+        ax[i, j].set_xlabel("Timestep")
+        ax[i, j].set_title(f"Episode {idx}")
+        '''
+        ax[idx].plot(rewards_across_eps_arr[idx], label=f"Episode {idx} Rewards")
+        ax[idx].set_ylabel("Reward") 
+        ax[idx].set_xlabel("Timestep")
+        ax[idx].set_title(f"Episode {idx}")
+        idx += 1
+fig.suptitle("Allocated Reward Curves Across Episodes")
+plt.tight_layout()
+plt.savefig("eg_plots/test33/episodewise_rewards.png")
 plt.close()
 
 print("All good so far")
