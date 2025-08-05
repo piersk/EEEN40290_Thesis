@@ -142,8 +142,6 @@ for ep in range(episodes):
             batch = buffer.sample(batch_size)
             states, actions, rewards, next_states, dones = map(np.array, zip(*batch))
 
-            # Replace the critic_loss and actor_loss functions with:
-
             def critic_loss(theta):
                 q_vals = []
                 targets = []

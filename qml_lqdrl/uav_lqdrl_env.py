@@ -90,8 +90,8 @@ class UAV:
         # TODO: MAY REQUIRE A 2-D ARRAY FOR SUM RATES IN FUTURE FOR MULTIPLE UAV-BS AGENTS IN FUTURE
         comms = 0
         for k in range(len(sum_rate_arr)):
-            #tx_power = 10**(tx_power_arr[k]/10)/1000
-            tx_power = tx_power_arr[k]
+            tx_power = 10**(tx_power_arr[k]/10)/1000
+            #tx_power = tx_power_arr[k]
             comms += tx_power * sum_rate_arr[k]
             #comms += tx_power_arr[k] * sum_rate_arr[k]
         #comms = self.tx_power * R_kn
@@ -135,6 +135,8 @@ class UAV_LQDRL_Environment(gym.Env):
         self.num_legit_users = 4
         self.K_FACTOR = 10
         self.SHADOWING_SIGMA = 4
+        self.NOISE_LOS = -100 # -100 dBm in Silvirianti et al (2025)
+        self.NOISE_NLOS = -80 # -80 dBm in Silvirianti et al (2025)
 
         #self.P_MAX = self.dbm_to_watt(30)
         self.P_MAX = 30
@@ -194,7 +196,7 @@ class UAV_LQDRL_Environment(gym.Env):
         #gu_centroid = np.mean([gu.position for gu in self.legit_users], axis=0)
         return np.concatenate([uav_pos, gu_pos, uav_energy]).astype(np.float32)
 
-    def dbm_to_watt(dbm):
+    def dbm_to_watt(self, dbm):
         return (10 ** ((dbm) / 10)) / 1000
 
     def compute_zeta(self, dist_to_centroid):
@@ -239,7 +241,8 @@ class UAV_LQDRL_Environment(gym.Env):
 
     # TODO: FIX COMMUNICATION MODEL
     def compute_awgn(self):
-        return np.random.normal(0, 1)
+        #return np.random.normal(0, 1)
+        return np.random.normal(0, 0.5)
 
     def compute_snr(self, tx_power, channel_gain, noise_power):
         #return 10 * np.log10(tx_power / noise_power**2 + 1e-9)
@@ -304,6 +307,7 @@ class UAV_LQDRL_Environment(gym.Env):
         # Calculate free space path loss in dB
         wavelength = 3e8 / self.f_carr
         fspl_db = 20 * np.log10(4 * np.pi * distance / wavelength)
+        print("Free Space Path Loss: ", fspl_db, "dB")
         
         # Generate Rician fading component (linear scale)
         b = np.sqrt(K_lin / (K_lin + 1))
@@ -448,10 +452,11 @@ class UAV_LQDRL_Environment(gym.Env):
                 #tx_power = self.compute_power_allocation(pwr_delta_arr[k])
                 tx_power = self.compute_power_allocation(pwr_delta)
                 print(f"Transmit Power {k}: ", tx_power, "dBm")
-                tx_power = dbm_to_watt(tx_power)
+                tx_power = self.dbm_to_watt(tx_power)
                 print(f"Transmit Power {k}: ", tx_power, "W")
                 tx_power_arr.append(tx_power)
-                noise_kn = awgn_arr[k]
+                #noise_kn = awgn_arr[k]
+                noise_kn = self.dbm_to_watt(self.NOISE_LOS)
                 print(f"AWGN {k}: ", noise_kn)
                 snr_legit = self.compute_snr(tx_power, gain, noise_kn)
                 print(f"SNR {k}: ", snr_legit)
