@@ -137,6 +137,9 @@ class UAV_LQDRL_Environment(gym.Env):
         self.SHADOWING_SIGMA = 4
         self.NOISE_LOS = -100 # -100 dBm in Silvirianti et al (2025)
         self.NOISE_NLOS = -80 # -80 dBm in Silvirianti et al (2025)
+        self.A1 = 1
+        self.A2 = 0.1
+        self.PATHLOSS_COEFF = 3 # Empirical value for urban terrain
 
         #self.P_MAX = self.dbm_to_watt(30)
         self.P_MAX = 30
@@ -299,6 +302,17 @@ class UAV_LQDRL_Environment(gym.Env):
     # TODO: EXPERIMENT WITH THIS CHANNEL MODEL 
     # ENSURE THAT THE GAIN IS BEING COMPUTED CORRECTLY
 
+    def rician_channel(self, distance, uav_pos, gu_pos, pl_coeff):
+        ref_pwr_gain = 7.5 # dBm
+        ref_pwr_gain = self.dbm_to_watt(ref_pwr_gain) # 0.25 W
+        tx_pwr_gain = ref_pwr_gain * distance**(-pl_coeff)
+        theta = np.arcsin(uav_pos[2] / distance)
+        K = self.A1 * np.exp(self.A2 * theta)
+        g = np.sqrt(K / (K + 1)) * 1 + np.sqrt(1 / (K + 1)) * self.compute_awgn()
+        channel_gain = np.sqrt(tx_pwr_gain) * g
+        return channel_gain
+
+    '''
     def rician_channel_gain(self, distance):
         """Compute Rician fading channel gain in linear scale"""
         #K_lin = 10 ** (self.K_FACTOR / 10)
@@ -325,7 +339,6 @@ class UAV_LQDRL_Environment(gym.Env):
         return 10 ** (gain_db / 20)  # Amplitude gain
     
 
-    '''
     def rician_channel_gain(self, distance, pathloss):
         #K_lin = 10**(self.K_FACTOR/10)
         b = np.sqrt(self.K_FACTOR / (self.K_FACTOR + 1))
@@ -422,7 +435,8 @@ class UAV_LQDRL_Environment(gym.Env):
                 awgn_arr.append(awgn)
                 #channel_gain = abs(self.compute_channel_gain(pathloss, awgn))
                 #channel_gain = self.rician_channel_gain(dist_from_gu, pathloss)
-                channel_gain = self.rician_channel_gain(dist_from_gu)
+                #channel_gain = self.rician_channel_gain(dist_from_gu)
+                channel_gain = self.rician_channel(dist_from_gu, uav_pos, gu_pos, self.PATHLOSS_COEFF)
                 i += 1
                 print(f"GU {i} Channel Gain: ", channel_gain)
                 channel_gain_arr.append(channel_gain)
