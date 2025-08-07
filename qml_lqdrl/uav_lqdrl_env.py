@@ -12,6 +12,21 @@ from gymnasium import spaces
 from scipy.stats import rice
 from scipy.special import iv
 
+class PIDController:
+    def __init__(self, kp, ki, kd):
+        self.kp = kp
+        self.ki = ki
+        self.kd = kd
+        self.integral = 0.0
+        self.prev_error = 0.0
+
+    def update(self, error, dt):
+        self.integral += error * dt
+        derivative = (error - self.prev_error) / dt if dt > 0 else 0
+        self.prev_error = error
+        return self.kp * error + self.ki * self.integral + self.kd * derivative
+
+
 # TODO: Update the UAVs & GUs for this to only include the Legitimate GUs (no subclasses required for this prototype) 
 # Do not consider secrecy for this model
 # === Ground User Base Classes ===
@@ -47,11 +62,23 @@ class UAV:
         self.prev_tx_power = 0
         self.prev_velocity = 0
         self.zeta = 1   # Default zeta value = 1
+        self.yaw = 0.0
+        self.pitch = 0.0
 
     # Function to move UAV in 3-D Cartesian Space
-    def move(self, delta_pos, dist):
+    def move(self, delta_pos, dist, bounds):
+        xmin, xmax, ymin, ymax, zmin, zmax = bounds
+        proposed_pos = self.position + delta_pos
+        clipped_pos = np.clip(proposed_pos, [xmin, ymin, zmin], [xmax, ymax, zmax])
+        delta_clipped = clipped_pos - self.position
+
+        #self.position += delta_clipped
         self.position += delta_pos
+        #self.position = clipped_pos 
         print("Change in UAV Position: ", delta_pos)
+        print("Clipped Change in UAV Position: ", delta_clipped)
+        #self.position += delta_pos
+        '''
         if (self.position[2] < 10):
             self.position[2] = 10
         if (self.position[2] > 122):
@@ -64,8 +91,9 @@ class UAV:
             self.position[0] = 0
         if (self.position[0] > 150):
             self.position[0] = 150
-        #self.velocity = np.linalg.norm(delta_pos)
+        '''
         self.velocity = dist
+        #self.velocity = np.linalg.norm(delta_pos)
         print("UAV Velocity: ", self.velocity)
         self.history.append(self.position.copy())
 
@@ -74,27 +102,35 @@ class UAV:
             return 0
         return np.linalg.norm(self.history[-1] - self.history[-2])
 
+    def update_orientation_and_move(self, yaw_cmd, pitch_cmd, throttle, delta_t, bounds, velocity):
+        self.velocity = velocity
+        self.yaw += yaw_cmd * delta_t
+        self.pitch += pitch_cmd * delta_t
+        self.pitch = np.clip(self.pitch, -np.pi/2, np.pi/2)
+
+        velocity = throttle * self.velocity
+        dx = velocity * np.cos(self.pitch) * np.cos(self.yaw)
+        dy = velocity * np.cos(self.pitch) * np.sin(self.yaw)
+        dz = velocity * np.sin(self.pitch)
+
+        delta_pos = np.array([dx, dy, dz])
+        self.move(delta_pos, velocity * delta_t, bounds)
+
     # 100 J/s avionics power from d'Andrea et al (2014)
-    #def compute_energy_consumption(self, num_uavs, sum_rate_arr, g=9.81, k=6.65, num_rotors=4, rho=1.225, theta=0.0507, Lambda=100):
-    # TODO: NORMALISE THE SUM RATE & CONVERT POWER TO LINEAR FROM dBm
     def compute_energy_consumption(self, tx_power_arr, sum_rate_arr, g=9.81, k=6.65, num_rotors=4, rho=1.225, theta=0.0507, Lambda=100):
         c_t = self.get_distance_travelled()
         c_t = abs(c_t)
         n_sum = self.mass
         travel = (n_sum * g * c_t) / (k * num_rotors)
         hover = ((n_sum * g) ** 1.5) / np.sqrt(2 * num_rotors * rho * theta)
-        #term3 = Lambda * c_t / (self.velocity + 1e-6)
-        avionics = Lambda * c_t / (self.velocity)
-        # TODO: REPLACE R_kn CONSTANT WITH COMPUTED SUM RATE FOR UAV-GU LINKS
-        #R_kn = 1.0
-        # TODO: MAY REQUIRE A 2-D ARRAY FOR SUM RATES IN FUTURE FOR MULTIPLE UAV-BS AGENTS IN FUTURE
+        min_v = 1
+        eff_v = max(self.velocity, min_v)
+        #avionics = Lambda * c_t / (eff_v) # Avoid dividing by 0
+        avionics = 0
         comms = 0
         for k in range(len(sum_rate_arr)):
             tx_power = 10**(tx_power_arr[k]/10)/1000
-            #tx_power = tx_power_arr[k]
             comms += tx_power * sum_rate_arr[k]
-            #comms += tx_power_arr[k] * sum_rate_arr[k]
-        #comms = self.tx_power * R_kn
         energy_cons = travel + hover + avionics + comms
         return energy_cons
 
@@ -137,7 +173,7 @@ class UAV_LQDRL_Environment(gym.Env):
         self.SHADOWING_SIGMA = 4
         self.NOISE_LOS = -100 # -100 dBm in Silvirianti et al (2025)
         self.NOISE_NLOS = -80 # -80 dBm in Silvirianti et al (2025)
-        self.A1 = 1
+        self.A1 = 4
         self.A2 = 0.1
         self.PATHLOSS_COEFF = 3 # Empirical value for urban terrain
 
@@ -146,7 +182,9 @@ class UAV_LQDRL_Environment(gym.Env):
         #self.E_MAX = 500e3  # 500kJ in paper
         self.E_MAX = 50e03 # Setting to 50kJ to speed up experiments for now
         #self.R_MIN = 0.75
-        self.R_MIN = 1e06
+        #self.R_MIN = 1e06
+        #self.R_MIN = 10e06
+        self.R_MIN = 8.5e06
         self.V_MAX = 50     # 50 m/s in paper
         self.xmin, self.ymin, self.zmin = 0, 0, 10 
         self.xmax, self.ymax, self.zmax = 150, 150, 122
@@ -181,13 +219,17 @@ class UAV_LQDRL_Environment(gym.Env):
             low=-1.0, high=1.0, shape=(5,), dtype=np.float32
         )
 
+        self.yaw_pid = PIDController(kp=5, ki=1.2, kd=1.875)
+        self.pitch_pid = PIDController(kp=5, ki=1.2, kd=1.875)
+
     def reset(self, *, seed=None, options=None):
         super().reset(seed=seed)
         for uav in self.uavs:
-            #uav.position = np.random.uniform([0, 0, 10], [200, 200, 100])
             uav.position = np.random.uniform([self.xmin, self.ymin, self.zmin], [self.xmax, self.ymax, self.zmax])
             uav.energy = self.E_MAX
             uav.history = [uav.position.copy()]
+            uav.yaw = 0.0
+            uav.pitch = 0.0
             uav.prev_distance_to_centroid = None
         return self._get_obs(), {}
 
@@ -196,7 +238,6 @@ class UAV_LQDRL_Environment(gym.Env):
         uav_pos = np.concatenate([uav.position for uav in self.uavs])
         gu_pos = np.concatenate([gu.position[:2] for gu in self.legit_users])
         uav_energy = np.array([self.uavs[0].energy], dtype=np.float32)
-        #gu_centroid = np.mean([gu.position for gu in self.legit_users], axis=0)
         return np.concatenate([uav_pos, gu_pos, uav_energy]).astype(np.float32)
 
     def dbm_to_watt(self, dbm):
@@ -209,16 +250,18 @@ class UAV_LQDRL_Environment(gym.Env):
     # Function to compute the velocity of the UAV for any timestep t
     # Zeta must be computed as a variable between 0 and 1 to scale against V_MAX
     def compute_velocity(self, zeta):
+        min_v = 5
         v = zeta * self.V_MAX
+        v = max(v, min_v)
         print("UAV Velocity: ", v, " m/s")
         return v
 
     # TODO: COMPUTE POLAR ANGLE CONSANTS FOR UAV TO MOVE UP, DOWN, LEFT & RIGHT 
     # Must determine angle between UAV trajectory vector and GU centroid in z-axis and xy-plane 
-    def compute_polar_angles(self):
-        zeta_p = 0
-        zeta_a = 0
-        return zeta_p, zeta_a
+    #def compute_polar_angles(self):
+    #    zeta_p = 0
+    #    zeta_a = 0
+    #    return zeta_p, zeta_a
 
     def get_uav_position(self):
         for uav in self.uavs:
@@ -301,56 +344,19 @@ class UAV_LQDRL_Environment(gym.Env):
 
     # TODO: EXPERIMENT WITH THIS CHANNEL MODEL 
     # ENSURE THAT THE GAIN IS BEING COMPUTED CORRECTLY
-
+    # WORK OUT WHAT THE g VALUE SHOULD BE 
     def rician_channel(self, distance, uav_pos, gu_pos, pl_coeff):
-        ref_pwr_gain = 7.5 # dBm
-        ref_pwr_gain = self.dbm_to_watt(ref_pwr_gain) # 0.25 W
-        tx_pwr_gain = ref_pwr_gain * distance**(-pl_coeff)
+        #ref_pwr_gain = 7.5 # dBm
+        #ref_pwr_gain = self.dbm_to_watt(ref_pwr_gain) # 0.25 W
+        ref_pwr_gain = (self.dbm_to_watt(self.P_MAX) / self.num_legit_users) * 1**(-pl_coeff) # 0.25 W
+        tx_pwr_gain = ref_pwr_gain * (distance**(-pl_coeff))
         theta = np.arcsin(uav_pos[2] / distance)
         K = self.A1 * np.exp(self.A2 * theta)
-        g = np.sqrt(K / (K + 1)) * 1 + np.sqrt(1 / (K + 1)) * self.compute_awgn()
-        channel_gain = np.sqrt(tx_pwr_gain) * g
+        #g = np.sqrt(K / (K + 1)) * 1 + np.sqrt(1 / (K + 1)) * self.compute_awgn()
+        g = np.sqrt(K / (K + 1)) * 1 - np.sqrt(1 / (K + 1)) * self.compute_awgn()
+        #channel_gain = np.sqrt(tx_pwr_gain) * g
+        channel_gain = g * (distance**(-pl_coeff))
         return channel_gain
-
-    '''
-    def rician_channel_gain(self, distance):
-        """Compute Rician fading channel gain in linear scale"""
-        #K_lin = 10 ** (self.K_FACTOR / 10)
-        K_lin = self.K_FACTOR
-        
-        # Calculate free space path loss in dB
-        wavelength = 3e8 / self.f_carr
-        fspl_db = 20 * np.log10(4 * np.pi * distance / wavelength)
-        print("Free Space Path Loss: ", fspl_db, "dB")
-        
-        # Generate Rician fading component (linear scale)
-        b = np.sqrt(K_lin / (K_lin + 1))
-        scale = np.sqrt(1 / (2 * (K_lin + 1)))
-        fading = rice.rvs(b, scale=scale)
-        
-        # Shadowing in dB
-        shadowing_db = np.random.normal(0, self.SHADOWING_SIGMA)
-        
-        # Total channel gain in dB
-        gain_db = fspl_db + 20 * np.log10(fading) + shadowing_db
-        
-        # Convert to linear scale
-        #return gain_db
-        return 10 ** (gain_db / 20)  # Amplitude gain
-    
-
-    def rician_channel_gain(self, distance, pathloss):
-        #K_lin = 10**(self.K_FACTOR/10)
-        b = np.sqrt(self.K_FACTOR / (self.K_FACTOR + 1))
-        #b = np.sqrt(K_lin / (K_lin + 1))
-        #scale = np.sqrt(1 / (2 * (K_lin + 1)))
-        scale = np.sqrt(1 / (2 * (self.K_FACTOR + 1)))
-        fading = rice.rvs(b=b, scale=scale)
-        shadowing = np.random.normal(0, self.SHADOWING_SIGMA)
-        gain_db = 20 * np.log10(fading) + shadowing - pathloss
-        h = 10**(gain_db/10)
-        return h
-    '''
 
     # TODO: COMPUTE CHANNEL GAIN USING PATHLOSS & AWGN
     # POTENTIAL UPDATE REQUIRED HERE AS GAIN SCALES POSITIVELY WITH PATHLOSS WHICH MAKES NO SENSE TO ME AT PRESENT
@@ -380,7 +386,6 @@ class UAV_LQDRL_Environment(gym.Env):
         return sum_rate / (energy_cons)
 
     def _compute_gu_centroid(self, gu_positions):
-        #gu_positions = np.array([gu.position for gu in self.legit_users])
         gu_centroid = np.mean(gu_positions, axis=0)
         return gu_centroid 
 
@@ -402,19 +407,52 @@ class UAV_LQDRL_Environment(gym.Env):
             dist_to_centroid = np.linalg.norm(uav.position - gu_centroid)
             # TODO: IMPLEMENT BETTER STEERING IN Z-AXIS & XY-PLANE
             # Only slow down speed when reasonably close to the GU centroid
-            if dist_to_centroid <= 100:
+            if dist_to_centroid <= 25:
                 zeta = self.compute_zeta(dist_to_centroid)
             else:
                 zeta = 1
             #zeta =self.compute_zeta(dist_to_centroid)
             dist = self.compute_velocity(zeta) * self.delta_t
+            print("UAV Velocity (step): ", dist, "m/s")
+            
+            target_vec = gu_centroid - uav.position
+            unit_vec = target_vec / np.linalg.norm(target_vec) if np.linalg.norm(target_vec) > 0 else np.zeros(3)
+            desired_yaw = np.arctan2(unit_vec[1], unit_vec[0])
+            desired_pitch = np.arcsin(unit_vec[2])
+
+            yaw_error = (desired_yaw - uav.yaw + np.pi) % (2 * np.pi) - np.pi
+            pitch_error = desired_pitch - uav.pitch
+
+            yaw_cmd = self.yaw_pid.update(yaw_error, self.delta_t)
+            pitch_cmd = self.pitch_pid.update(pitch_error, self.delta_t)
+
+            throttle = np.clip(zeta, 0.1, 1.0)
+            uav.update_orientation_and_move(yaw_cmd, pitch_cmd, throttle, self.delta_t,
+                                            [self.xmin, self.ymin, self.zmin, self.xmax, self.ymax, self.zmax], dist)
+
+            '''
+            # Direction vector from UAV to centroid (normalized)
+            direction_to_centroid = gu_centroid - uav.position
+            direction_to_centroid /= (np.linalg.norm(direction_to_centroid) + 1e-8)  # avoid div by 0
+
+            # Weighted combination of policy action and centroid direction
+            steering_ratio = 0.75  # higher = more directed toward centroid
+            action_vector = (steering_ratio * direction_to_centroid + (1 - steering_ratio) * action[:3])
+            action_vector /= (np.linalg.norm(action_vector) + 1e-8)  # normalize again
+
+            # Compute delta movement
+            delta = action_vector * dist
+
+            # Apply movement
+            uav.move(delta, dist, [self.xmin, self.ymin, self.zmin, self.xmax, self.ymax, self.zmax])
+
             #delta = action[i*3:(i+1)*3] * v
-            delta = action[:3] * dist
-            uav.move(delta, dist)
+            #delta = action[:3] * dist
+            #uav.move(delta, dist, [self.xmin, self.ymin, self.zmin, self.xmax, self.ymax, self.zmax])
+            '''
 
             # TODO: ADD SUBCHANNEL BWS TO ARRAY HERE FOR UAVs & GUs
             # NB: THIS WAS DONE IN _compute_reward()
-
             # PASS SUBCHANNEL BWS TO COMPUTE_SUM_RATE
             # PASS RESULTS FROM THIS TO COMPUTE ENERGY EFFICIENCY FUNCTION
             # CALL COMPUTE REWARD FUNCTION HERE TO DO THIS
@@ -531,13 +569,17 @@ class UAV_LQDRL_Environment(gym.Env):
         reward = 0
         grant_reward = False
         masr = np.sum(sum_rate_arr, axis=0)
+        uav = self.uavs[0]
+        uav.prev_energy_consumption = energy_consumption
         energy_eff = self._compute_energy_efficiency(masr, energy_consumption)
         print("Energy Efficiency: ", energy_eff)
         j = 0
         for k in range(0, self.num_legit_users):
             sum_rate = sum_rate_arr[k]
             print(f"Sum Rate {k}: ", sum_rate)
-            if sum_rate / (self.f_carr / self.num_legit_users) > self.R_MIN / self.f_carr:
+            #if sum_rate / (self.f_carr / self.num_legit_users) > self.R_MIN / self.f_carr:
+            if sum_rate > self.R_MIN:
+                #reward += energy_eff / self.num_legit_users
                 j += 1
                 if k == (self.num_legit_users - 1) and k == (j - 1):
                     grant_reward = True
@@ -546,6 +588,7 @@ class UAV_LQDRL_Environment(gym.Env):
 
         if grant_reward == True:
             reward = energy_eff
+            print("All users above R_min")
 
         return reward
 

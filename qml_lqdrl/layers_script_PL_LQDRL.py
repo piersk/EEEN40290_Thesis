@@ -33,7 +33,7 @@ def plot_uav_trajectory(env, uav_trajectory, layer, ep, t):
         ax.scatter(uav_position[0], uav_position[1], uav_position[2], label="UAV Positions", color="cyan")
     ax.scatter(*centroid, label="GU Centroid", color="red", marker="X", s=100)
     plt.legend()
-    plt.savefig(f'multi_layer_outputs/plots_multi_layer/test1/{layer}_uav_trajectory_{ep}_timestep_{t}.png')
+    plt.savefig(f'multi_layer_outputs/plots_multi_layer/test10/{layer}_uav_trajectory_{ep}_timestep_{t}.png')
     plt.close()
 
 def gradient_norm(grad):
@@ -47,7 +47,7 @@ from pennylane.optimize import AdamOptimizer
 from prioritised_experience_replay import SumTree, Memory
 
 # TODO: RUN SCRIPT FOR INCREASING NUMBER OF LAYERS (1-5 layers, for example)
-m_layers = 2
+m_layers = 1
 for m in range(m_layers):
     print(f"============ Experiment with {m+1} Layers in Ansatz ============")
     env = UAV_LQDRL_Environment()
@@ -70,7 +70,8 @@ for m in range(m_layers):
     episodes = 2
     batch_size = 20
     gamma = 0.99
-    max_act_scale = 1e1
+    max_act_scale = 1e15
+    #max_act_scale = 1
 
     time_step = 1
 
@@ -182,7 +183,7 @@ for m in range(m_layers):
                 print(f"Episode {ep} Step {time_var} Actor Gradients: ", actor_grads)
                 print(f"Actor Grad Norm: {gradient_norm(actor_grads)}")
 
-                with open("output_files/gradients_out_test35.log", "a") as f:
+                with open("output_files/gradients_out_test105.log", "a") as f:
                     f.write(f"Episode {ep}, Step {i}\n")
                     f.write("Critic Gradients:\n")
                     f.write("Mean & Standard Deviation:\n")
@@ -207,9 +208,11 @@ for m in range(m_layers):
             print(f"Time taken for step {i} to execute: ", abs(step_time), " seconds")
             i += 1
             # Break out of episode early (for debugging purposes)
-            #break_var += 1
-            #if break_var >= 50:
-            #    break
+            if dist_to_centroid_arr[i-2] is not None:
+                if (dist_to_centroid_arr[i-2] == dist_to_centroid_arr[i-1]):
+                    break_var += 1
+            if break_var >= 50:
+                break
 
         ep_end_time = time.time()
         ep_time = ep_start_time - ep_end_time
@@ -227,7 +230,7 @@ for m in range(m_layers):
     plt.title("Total Reward per Episode")
     plt.xlabel("Episode")
     plt.ylabel("Total Reward")
-    plt.savefig(f"multi_layer_outputs/plots_multi_layer/test1/{m+1}_rewards_over_episodes.png")
+    plt.savefig(f"multi_layer_outputs/plots_multi_layer/test10/{m+1}_rewards_over_episodes.png")
     plt.close()
 
     plt.plot(actor_losses, label="Actor Loss")
@@ -236,50 +239,72 @@ for m in range(m_layers):
     plt.title("Actor and Critic Loss")
     plt.xlabel("Training Step")
     plt.ylabel("Loss")
-    plt.savefig(f"multi_layer_outputs/plots_multi_layer/test1/{m+1}_layers_losses.png")
+    plt.savefig(f"multi_layer_outputs/plots_multi_layer/test10/{m+1}_layers_losses.png")
     plt.close()
 
     #fig, ax = plt.subplots(5, 4, figsize=(20, 16))
     fig, ax = plt.subplots(2, 1, figsize=(20, 16))
     idx = 0
-    for i in range(1):
-        for j in range(2):
-            '''
-            ax[i, j].plot(ep_distances_to_centroid[idx], label=f"Episode {idx} Distance of UAV-BS to Centroid")
-            ax[i, j].set_ylabel("Distance") 
-            ax[i, j].set_xlabel("Time")
-            ax[i, j].set_title(f"Episode {idx}")
-            '''
-            ax[idx].plot(ep_distances_to_centroid[idx], label=f"Episode {idx} Distance of UAV-BS to Centroid")
-            ax[idx].set_ylabel("Distance") 
-            ax[idx].set_xlabel("Time")
-            ax[idx].set_title(f"Episode {idx}")
-            idx += 1
+    for i in range(2):
+        #for j in range(1):
+        ax[i].plot(ep_distances_to_centroid[idx], label=f"Episode {idx} Distance of UAV-BS to Centroid")
+        ax[i].set_ylabel("Distance") 
+        ax[i].set_xlabel("Time")
+        ax[i].set_title(f"Episode {idx}")
+        '''
+        ax[i, j].plot(ep_distances_to_centroid[idx], label=f"Episode {idx} Distance of UAV-BS to Centroid")
+        ax[i, j].set_ylabel("Distance") 
+        ax[i, j].set_xlabel("Time")
+        ax[i, j].set_title(f"Episode {idx}")
+        '''
+        idx += 1
     fig.suptitle("UAV-BS Distances to GU Centroid Across Episodes")
     plt.tight_layout()
-    plt.savefig(f"multi_layer_outputs/plots_multi_layer/test1/{m+1}_layers_distances_to_centroid.png")
+    plt.savefig(f"multi_layer_outputs/plots_multi_layer/test10/{m+1}_layers_distances_to_centroid.png")
     plt.close()
 
     #fig, ax = plt.subplots(5, 4, figsize=(20, 16))
     fig, ax = plt.subplots(2, 1, figsize=(20, 16))
     idx = 0
-    for i in range(1):
-        for j in range(2):
-            '''
-            ax[i, j].plot(rewards_across_eps_arr[idx], label=f"Episode {idx} Rewards")
-            ax[i, j].set_ylabel("Reward") 
-            ax[i, j].set_xlabel("Timestep")
-            ax[i, j].set_title(f"Episode {idx}")
-            '''
-            ax[idx].plot(rewards_across_eps_arr[idx], label=f"Episode {idx} Rewards")
-            ax[idx].set_ylabel("Reward") 
-            ax[idx].set_xlabel("Timestep")
-            ax[idx].set_title(f"Episode {idx}")
-            idx += 1
+    for i in range(2):
+        #for j in range(1):
+        ax[i].plot(rewards_across_eps_arr[idx], label=f"Episode {idx} Rewards")
+        ax[i].set_ylabel("Reward") 
+        ax[i].set_xlabel("Timestep")
+        ax[i].set_title(f"Episode {idx}")
+        '''
+        ax[i, j].plot(rewards_across_eps_arr[idx], label=f"Episode {idx} Rewards")
+        ax[i, j].set_ylabel("Reward") 
+        ax[i, j].set_xlabel("Timestep")
+        ax[i, j].set_title(f"Episode {idx}")
+        '''
+        #idx += 1
+        idx += 1
     fig.suptitle("Allocated Reward Curves Across Episodes")
     plt.tight_layout()
-    plt.savefig(f"multi_layer_outputs/plots_multi_layer/test1/{m+1}_layers_episodewise_rewards.png")
+    plt.savefig(f"multi_layer_outputs/plots_multi_layer/test10/{m+1}_layers_episodewise_rewards.png")
     plt.close()
+
+    '''
+    fig, ax = plt.subplots(2, 1, figsize=(20, 16))
+    idx = 0
+    for i in range(2):
+        for j in range(1):
+            ax[idx].plot(ep_distances_to_centroid[idx], rewards_across_eps_arr[idx])
+            ax[idx].set_ylabel("Distance") 
+            ax[idx].set_xlabel("Reward")
+            ax[idx].set_title(f"Episode {idx}")
+            ax[i, j].plot(ep_distances_to_centroid[idx], rewards_across_eps_arr[idx])
+            ax[i, j].set_ylabel("Distance") 
+            ax[i, j].set_xlabel("Reward")
+            ax[i, j].set_title(f"Episode {idx}")
+            #idx += 1
+            idx += 1
+    fig.suptitle("UAV-BS Distances to GU Centroid vs Rewards Across Episodes")
+    plt.tight_layout()
+    plt.savefig(f"multi_layer_outputs/plots_multi_layer/test10/{m+1}_layers_distances_vs_rewards.png")
+    plt.close()
+    '''
 
     print("All good so far")
     total_runtime_end = time.time()
