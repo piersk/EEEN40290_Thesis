@@ -64,6 +64,7 @@ class UAV:
         self.zeta = 1   # Default zeta value = 1
         self.yaw = 0.0
         self.pitch = 0.0
+        self.curr_sum_rates = []
 
     # Function to move UAV in 3-D Cartesian Space
     def move(self, delta_pos, dist, bounds):
@@ -170,8 +171,6 @@ class UAV_LQDRL_Environment(gym.Env):
         self.P_MAX = 30
         #self.E_MAX = 500e3  # 500kJ in paper
         self.E_MAX = 50e03 # Setting to 50kJ to speed up experiments for now
-        #self.R_MIN = 0.75
-        #self.R_MIN = 1e06
         #self.R_MIN = 10e06
         #self.R_MIN = 9.85e06
         self.R_MIN = 9.5e06
@@ -277,6 +276,9 @@ class UAV_LQDRL_Environment(gym.Env):
             hist = uav.history
             hist_arr.append(hist)
         return hist_arr
+
+    def get_sum_rates(self):
+        return self.curr_sum_rates
 
     # TODO: FIX COMMUNICATION MODEL
     def compute_awgn(self):
@@ -419,33 +421,6 @@ class UAV_LQDRL_Environment(gym.Env):
             dist = self.compute_velocity(zeta) * self.delta_t
             print("UAV Velocity (step): ", dist, "m/s")
             
-            '''
-            target_vec = gu_centroid - uav.position
-            unit_vec = target_vec / np.linalg.norm(target_vec) if np.linalg.norm(target_vec) > 0 else np.zeros(3)
-            desired_yaw = np.arctan2(unit_vec[1], unit_vec[0])
-            desired_pitch = np.arcsin(unit_vec[2])
-
-            yaw_error = (desired_yaw - uav.yaw + np.pi) % (2 * np.pi) - np.pi
-            pitch_error = desired_pitch - uav.pitch
-
-            yaw_cmd = self.yaw_pid.update(yaw_error, self.delta_t)
-            pitch_cmd = self.pitch_pid.update(pitch_error, self.delta_t)
-            print("Yaw: ", yaw_cmd)
-            print("Pitch: ", pitch_cmd)
-
-            #if dist_to_centroid <= 50:
-            #    yaw_cmd = 0.0
-            #    pitch_cmd = 0.0
-
-            throttle = np.clip(zeta, 0.1, 1.0)
-            print("Throttle: ", throttle)
-            #delta_pos, velocity, bounds = uav.update_orientation_and_move(yaw_cmd, pitch_cmd, throttle, self.delta_t, 
-            #                                                              [self.xmin, self.ymin, self.zmin, self.xmax, self.ymax, self.zmax], dist)
-            delta_pos, velocity, bounds = uav.update_orientation_and_move(yaw_cmd, pitch_cmd, throttle, self.delta_t, 
-                                                                          [self.xmin, self.ymin, self.zmin, self.xmax, self.ymax, self.zmax], dist)
-            uav.move(delta_pos, velocity, bounds)
-
-            '''
             # Direction vector from UAV to centroid (normalized)
             direction_to_centroid = gu_centroid - uav.position
             direction_to_centroid /= (np.linalg.norm(direction_to_centroid) + 1e-8)  # avoid div by 0
@@ -466,12 +441,8 @@ class UAV_LQDRL_Environment(gym.Env):
             uav.move(delta, dist, [self.xmin, self.ymin, self.zmin, self.xmax, self.ymax, self.zmax])
 
             # TODO: ADD SUBCHANNEL BWS TO ARRAY HERE FOR UAVs & GUs
-            # NB: THIS WAS DONE IN _compute_reward()
             # PASS SUBCHANNEL BWS TO COMPUTE_SUM_RATE
             # PASS RESULTS FROM THIS TO COMPUTE ENERGY EFFICIENCY FUNCTION
-            # CALL COMPUTE REWARD FUNCTION HERE TO DO THIS
-            # CALCULATE REWARDS BASED ON ENERGY EFFICIENCY SUCH THAT SUM RATE IS MORE THAN THE MINIMUM DESIRABLE SUM RATE (ONLY ALLOCATE IF R_sum > R_min)
-            #noise = self.compute_awgn()
             channel_gain_arr = []
             pwr_delta_arr = []
             awgn_arr = []
@@ -497,18 +468,7 @@ class UAV_LQDRL_Environment(gym.Env):
             snr_arr = []
             bw_arr = self.compute_subcarrier_allocation(self.f_carr)
             sum_rate_arr = []
-            # TODO: COMPUTE ALL TX_POWER COEFFICIENTS IN ONE GO AND SORT AS AN ARRAY
-            # SORT GAIN ARRAY IN ASCENDING ORDER AND REVERSE THIS LIST TO USE IT AS DELTA_ARR
-            '''
-            pwr_delta_arr = []
-            channel_gain_arr.sort()
-            for k in range(self.num_legit_users):
-                gain = channel_gain_arr[k]
-                pwr_delta = self.compute_power_coefficients(gain, channel_gain_arr)
-                pwr_delta_arr.append(pwr_delta)
-            pwr_delta_arr.sort(reverse=True)
-            '''
-
+            
             for k, gu in enumerate(self.legit_users):
                 print("=================================")
                 gain = channel_gain_arr[k]
@@ -532,6 +492,7 @@ class UAV_LQDRL_Environment(gym.Env):
                 r_kn = self.compute_r_k(bw_subchan, snr_legit)
                 print(f"Data rate {k}: ", r_kn, "bps")
                 sum_rate_arr.append(r_kn)
+            self.curr_sum_rates = sum_rate_arr
 
             #sum_rate_arr = self.compute_sum_rate(bw_arr, snr_legit)
         # Energy consumption should only occur once per step for 1 UAV and once per UAV per step if multiple UAV-BSs are to be used
@@ -552,6 +513,8 @@ class UAV_LQDRL_Environment(gym.Env):
 
         gu_diffs = []
         gu_diffs = self._compute_gu_pos_diff(dist_from_gu_arr)
+
+        self.get_sum_rates(sum_rate_arr)
 
         # Reward boost for UAV becoming more equidistant between the GUs
         for i in range(len(gu_diffs)):
