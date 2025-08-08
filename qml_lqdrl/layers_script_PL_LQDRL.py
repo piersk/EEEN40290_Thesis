@@ -33,7 +33,7 @@ def plot_uav_trajectory(env, uav_trajectory, layer, ep, t):
         ax.scatter(uav_position[0], uav_position[1], uav_position[2], label="UAV Positions", color="cyan")
     ax.scatter(*centroid, label="GU Centroid", color="red", marker="X", s=100)
     plt.legend()
-    plt.savefig(f'multi_layer_outputs/plots_multi_layer/test10/{layer}_uav_trajectory_{ep}_timestep_{t}.png')
+    plt.savefig(f'multi_layer_outputs/plots_multi_layer/test13/{layer}_uav_trajectory_{ep}_timestep_{t}.png')
     plt.close()
 
 def gradient_norm(grad):
@@ -47,6 +47,7 @@ from pennylane.optimize import AdamOptimizer
 from prioritised_experience_replay import SumTree, Memory
 
 # TODO: RUN SCRIPT FOR INCREASING NUMBER OF LAYERS (1-5 layers, for example)
+
 m_layers = 1
 for m in range(m_layers):
     print(f"============ Experiment with {m+1} Layers in Ansatz ============")
@@ -68,17 +69,17 @@ for m in range(m_layers):
     critic_opt_state = critic_opt.init(critic.theta)
 
     episodes = 2
-    batch_size = 20
+    batch_size = 30
     gamma = 0.99
     max_act_scale = 1e15
     #max_act_scale = 1
 
     time_step = 1
+    diff = 0
 
     time_arr = []
 
     tot_reward_arr = []
-    step_rewards_arr = []
     rewards_across_eps_arr = []
     actor_losses = []
     critic_losses = []
@@ -97,6 +98,7 @@ for m in range(m_layers):
         total_reward = 0
         ep_uav_trajectory = []
         dist_to_centroid_arr = []
+        step_rewards_arr = []
         break_var = 0
 
         while not done:
@@ -183,7 +185,7 @@ for m in range(m_layers):
                 print(f"Episode {ep} Step {time_var} Actor Gradients: ", actor_grads)
                 print(f"Actor Grad Norm: {gradient_norm(actor_grads)}")
 
-                with open("output_files/gradients_out_test105.log", "a") as f:
+                with open("output_files/gradients_out_test135.log", "a") as f:
                     f.write(f"Episode {ep}, Step {i}\n")
                     f.write("Critic Gradients:\n")
                     f.write("Mean & Standard Deviation:\n")
@@ -209,9 +211,12 @@ for m in range(m_layers):
             i += 1
             # Break out of episode early (for debugging purposes)
             if dist_to_centroid_arr[i-2] is not None:
-                if (dist_to_centroid_arr[i-2] == dist_to_centroid_arr[i-1]):
+                diff = dist_to_centroid_arr[i-2] - dist_to_centroid_arr[i-1]
+                #if (dist_to_centroid_arr[i-2] == dist_to_centroid_arr[i-1]):
+                    #break_var += 1
+                if (diff <= 0.5):
                     break_var += 1
-            if break_var >= 50:
+            if break_var >= 125:
                 break
 
         ep_end_time = time.time()
@@ -230,7 +235,7 @@ for m in range(m_layers):
     plt.title("Total Reward per Episode")
     plt.xlabel("Episode")
     plt.ylabel("Total Reward")
-    plt.savefig(f"multi_layer_outputs/plots_multi_layer/test10/{m+1}_rewards_over_episodes.png")
+    plt.savefig(f"multi_layer_outputs/plots_multi_layer/test13/{m+1}_rewards_over_episodes.png")
     plt.close()
 
     plt.plot(actor_losses, label="Actor Loss")
@@ -239,7 +244,7 @@ for m in range(m_layers):
     plt.title("Actor and Critic Loss")
     plt.xlabel("Training Step")
     plt.ylabel("Loss")
-    plt.savefig(f"multi_layer_outputs/plots_multi_layer/test10/{m+1}_layers_losses.png")
+    plt.savefig(f"multi_layer_outputs/plots_multi_layer/test13/{m+1}_layers_losses.png")
     plt.close()
 
     #fig, ax = plt.subplots(5, 4, figsize=(20, 16))
@@ -260,7 +265,7 @@ for m in range(m_layers):
         idx += 1
     fig.suptitle("UAV-BS Distances to GU Centroid Across Episodes")
     plt.tight_layout()
-    plt.savefig(f"multi_layer_outputs/plots_multi_layer/test10/{m+1}_layers_distances_to_centroid.png")
+    plt.savefig(f"multi_layer_outputs/plots_multi_layer/test13/{m+1}_layers_distances_to_centroid.png")
     plt.close()
 
     #fig, ax = plt.subplots(5, 4, figsize=(20, 16))
@@ -282,7 +287,23 @@ for m in range(m_layers):
         idx += 1
     fig.suptitle("Allocated Reward Curves Across Episodes")
     plt.tight_layout()
-    plt.savefig(f"multi_layer_outputs/plots_multi_layer/test10/{m+1}_layers_episodewise_rewards.png")
+    plt.savefig(f"multi_layer_outputs/plots_multi_layer/test13/{m+1}_layers_episodewise_rewards.png")
+    plt.close()
+
+    fig, ax = plt.subplots(2, 1, figsize=(20, 16))  # One subplot per episode
+    for i in range(2):  # Assuming 2 episodes
+        rewards = rewards_across_eps_arr[i]
+        distances = ep_distances_to_centroid[i]
+        
+        min_len = min(len(rewards), len(distances))  # In case lengths mismatch
+        ax[i].plot(distances[:min_len], rewards[:min_len])
+        ax[i].set_xlabel("Distance to Centroid")
+        ax[i].set_ylabel("Reward")
+        ax[i].set_title(f"Episode {i}: Reward vs Distance")
+
+    fig.suptitle("Reward vs Distance to Centroid")
+    plt.tight_layout()
+    plt.savefig(f"multi_layer_outputs/plots_multi_layer/test13/{m+1}_layers_reward_vs_distance.png")
     plt.close()
 
     '''
@@ -302,7 +323,7 @@ for m in range(m_layers):
             idx += 1
     fig.suptitle("UAV-BS Distances to GU Centroid vs Rewards Across Episodes")
     plt.tight_layout()
-    plt.savefig(f"multi_layer_outputs/plots_multi_layer/test10/{m+1}_layers_distances_vs_rewards.png")
+    plt.savefig(f"multi_layer_outputs/plots_multi_layer/test13/{m+1}_layers_distances_vs_rewards.png")
     plt.close()
     '''
 

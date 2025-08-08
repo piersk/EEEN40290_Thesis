@@ -70,28 +70,14 @@ class UAV:
         xmin, xmax, ymin, ymax, zmin, zmax = bounds
         proposed_pos = self.position + delta_pos
         clipped_pos = np.clip(proposed_pos, [xmin, ymin, zmin], [xmax, ymax, zmax])
-        delta_clipped = clipped_pos - self.position
+        #delta_clipped = clipped_pos - self.position
+        delta_clipped = self.position - clipped_pos
 
-        #self.position += delta_clipped
         self.position += delta_pos
         #self.position = clipped_pos 
         print("Change in UAV Position: ", delta_pos)
         print("Clipped Change in UAV Position: ", delta_clipped)
         #self.position += delta_pos
-        '''
-        if (self.position[2] < 10):
-            self.position[2] = 10
-        if (self.position[2] > 122):
-            self.position[2] = 122
-        if (self.position[1] <= 0):
-            self.position[1] = 0
-        if (self.position[1] > 150):
-            self.position[1] = 150
-        if (self.position[0] <= 0):
-            self.position[0] = 0
-        if (self.position[0] > 150):
-            self.position[0] = 150
-        '''
         self.velocity = dist
         #self.velocity = np.linalg.norm(delta_pos)
         print("UAV Velocity: ", self.velocity)
@@ -109,12 +95,15 @@ class UAV:
         self.pitch = np.clip(self.pitch, -np.pi/2, np.pi/2)
 
         velocity = throttle * self.velocity
+        #velocity = zeta * self.velocity
         dx = velocity * np.cos(self.pitch) * np.cos(self.yaw)
         dy = velocity * np.cos(self.pitch) * np.sin(self.yaw)
         dz = velocity * np.sin(self.pitch)
 
         delta_pos = np.array([dx, dy, dz])
-        self.move(delta_pos, velocity * delta_t, bounds)
+        velocity *= delta_t
+        return delta_pos, velocity, bounds
+        #self.move(delta_pos, velocity * delta_t, bounds)
 
     # 100 J/s avionics power from d'Andrea et al (2014)
     def compute_energy_consumption(self, tx_power_arr, sum_rate_arr, g=9.81, k=6.65, num_rotors=4, rho=1.225, theta=0.0507, Lambda=100):
@@ -123,10 +112,10 @@ class UAV:
         n_sum = self.mass
         travel = (n_sum * g * c_t) / (k * num_rotors)
         hover = ((n_sum * g) ** 1.5) / np.sqrt(2 * num_rotors * rho * theta)
-        min_v = 1
+        min_v = 5
         eff_v = max(self.velocity, min_v)
-        #avionics = Lambda * c_t / (eff_v) # Avoid dividing by 0
-        avionics = 0
+        avionics = Lambda * c_t / (eff_v) # Avoid dividing by 0
+        #avionics = 0
         comms = 0
         for k in range(len(sum_rate_arr)):
             tx_power = 10**(tx_power_arr[k]/10)/1000
@@ -184,7 +173,9 @@ class UAV_LQDRL_Environment(gym.Env):
         #self.R_MIN = 0.75
         #self.R_MIN = 1e06
         #self.R_MIN = 10e06
-        self.R_MIN = 8.5e06
+        #self.R_MIN = 9.85e06
+        self.R_MIN = 9.5e06
+        #self.R_MIN = 8.5e06 # MULTI-LAYER TEST 10 R_MIN
         self.V_MAX = 50     # 50 m/s in paper
         self.xmin, self.ymin, self.zmin = 0, 0, 10 
         self.xmax, self.ymax, self.zmax = 150, 150, 122
@@ -221,6 +212,8 @@ class UAV_LQDRL_Environment(gym.Env):
 
         self.yaw_pid = PIDController(kp=5, ki=1.2, kd=1.875)
         self.pitch_pid = PIDController(kp=5, ki=1.2, kd=1.875)
+        #self.yaw_pid = PIDController(kp=3, ki=0.8, kd=2.8125)
+        #self.pitch_pid = PIDController(kp=3, ki=0.8, kd=2.8125)
 
     def reset(self, *, seed=None, options=None):
         super().reset(seed=seed)
@@ -389,6 +382,15 @@ class UAV_LQDRL_Environment(gym.Env):
         gu_centroid = np.mean(gu_positions, axis=0)
         return gu_centroid 
 
+    def _compute_gu_pos_diff(self, gu_positions):
+        gu_diffs = []
+        other_positions = len(gu_positions) - 1
+        for i in range(len(gu_positions)):
+            for j in range(i, other_positions):
+                gu_diff = abs(gu_positions[i] - gu_positions[j + 1])
+                gu_diffs.append(gu_diff)
+        return gu_diffs
+
     # TODO: INCLUDE SELF-LINK TOPOLOGY DICTIONARY
 
     # TODO: STEP FUNCTION
@@ -398,8 +400,10 @@ class UAV_LQDRL_Environment(gym.Env):
     # ONLY HANDLE COMPUTATION AS NEEDED INSTEAD OF BOTH IN step() AND _compute_reward()
     def step(self, action):
         action = np.clip(action, -1, 1)
+        #action += np.random.normal(0, 5e-02, size=action.shape)
         energy_cons_penalty = 0
         reward_boost = 0
+        zeta = 1
         for i, uav in enumerate(self.uavs):
             gu_positions = np.array([gu.position for gu in self.legit_users])
             gu_centroid = self._compute_gu_centroid(gu_positions)
@@ -415,6 +419,7 @@ class UAV_LQDRL_Environment(gym.Env):
             dist = self.compute_velocity(zeta) * self.delta_t
             print("UAV Velocity (step): ", dist, "m/s")
             
+            '''
             target_vec = gu_centroid - uav.position
             unit_vec = target_vec / np.linalg.norm(target_vec) if np.linalg.norm(target_vec) > 0 else np.zeros(3)
             desired_yaw = np.arctan2(unit_vec[1], unit_vec[0])
@@ -425,10 +430,20 @@ class UAV_LQDRL_Environment(gym.Env):
 
             yaw_cmd = self.yaw_pid.update(yaw_error, self.delta_t)
             pitch_cmd = self.pitch_pid.update(pitch_error, self.delta_t)
+            print("Yaw: ", yaw_cmd)
+            print("Pitch: ", pitch_cmd)
+
+            #if dist_to_centroid <= 50:
+            #    yaw_cmd = 0.0
+            #    pitch_cmd = 0.0
 
             throttle = np.clip(zeta, 0.1, 1.0)
-            uav.update_orientation_and_move(yaw_cmd, pitch_cmd, throttle, self.delta_t,
-                                            [self.xmin, self.ymin, self.zmin, self.xmax, self.ymax, self.zmax], dist)
+            print("Throttle: ", throttle)
+            #delta_pos, velocity, bounds = uav.update_orientation_and_move(yaw_cmd, pitch_cmd, throttle, self.delta_t, 
+            #                                                              [self.xmin, self.ymin, self.zmin, self.xmax, self.ymax, self.zmax], dist)
+            delta_pos, velocity, bounds = uav.update_orientation_and_move(yaw_cmd, pitch_cmd, throttle, self.delta_t, 
+                                                                          [self.xmin, self.ymin, self.zmin, self.xmax, self.ymax, self.zmax], dist)
+            uav.move(delta_pos, velocity, bounds)
 
             '''
             # Direction vector from UAV to centroid (normalized)
@@ -447,9 +462,8 @@ class UAV_LQDRL_Environment(gym.Env):
             uav.move(delta, dist, [self.xmin, self.ymin, self.zmin, self.xmax, self.ymax, self.zmax])
 
             #delta = action[i*3:(i+1)*3] * v
-            #delta = action[:3] * dist
-            #uav.move(delta, dist, [self.xmin, self.ymin, self.zmin, self.xmax, self.ymax, self.zmax])
-            '''
+            delta = action[:3] * dist
+            uav.move(delta, dist, [self.xmin, self.ymin, self.zmin, self.xmax, self.ymax, self.zmax])
 
             # TODO: ADD SUBCHANNEL BWS TO ARRAY HERE FOR UAVs & GUs
             # NB: THIS WAS DONE IN _compute_reward()
@@ -461,19 +475,18 @@ class UAV_LQDRL_Environment(gym.Env):
             channel_gain_arr = []
             pwr_delta_arr = []
             awgn_arr = []
+            dist_from_gu_arr = []
             i = 0
             for gu in self.legit_users:
                 uav_pos = uav.position
                 gu_pos = gu.position
                 dist_from_gu = np.linalg.norm(uav_pos - gu_pos)
+                dist_from_gu_arr.append(dist_from_gu)
                 #pathloss = self.compute_pathloss(self.f_carr, uav_pos, gu_pos)
                 awgn = self.compute_awgn()
                 # Ensure the AWGN value is positive
                 awgn = np.sqrt(awgn**2)
                 awgn_arr.append(awgn)
-                #channel_gain = abs(self.compute_channel_gain(pathloss, awgn))
-                #channel_gain = self.rician_channel_gain(dist_from_gu, pathloss)
-                #channel_gain = self.rician_channel_gain(dist_from_gu)
                 channel_gain = self.rician_channel(dist_from_gu, uav_pos, gu_pos, self.PATHLOSS_COEFF)
                 i += 1
                 print(f"GU {i} Channel Gain: ", channel_gain)
@@ -531,12 +544,27 @@ class UAV_LQDRL_Environment(gym.Env):
         print("UAV Energy Consumption: ", uav_energy_cons)
         uav.energy -= uav_energy_cons
 
+        # TODO: POSSIBLY REMOVE THIS SO THAT UAV EXPLORES MORE
         if uav_energy_cons > uav.prev_energy_consumption:
-            energy_cons_penalty += 0.1
+            energy_cons_penalty += 0.0
         else:
             energy_cons_penalty = 0
 
-        if dist_to_centroid <= 30 and dist_to_centroid >= self.zmin:
+        gu_diffs = []
+        gu_diffs = self._compute_gu_pos_diff(dist_from_gu_arr)
+
+        # Reward boost for UAV becoming more equidistant between the GUs
+        for i in range(len(gu_diffs)):
+            if gu_diffs[i] <= 40:
+                reward_boost += 0.05
+            if gu_diffs[i] <= 20:
+                reward_boost += 0.075
+            if gu_diffs[i] <= 10:
+                reward_boost += 0.1
+
+        # TODO: INTRODUCE REWARD BOOST FOR LEAST AMOUNT OF DIFFERENCE IN DISTANCE BETWEEN UAV AND ALL GUs
+        # CALCULATE DIFFERENCES BETWEEN ALL GUs & UAV AND AIM TO MINIMISE THIS VALUE FOR FAIR COVERAGE
+        if dist_to_centroid <= 30 and uav.position[2] >= self.zmin:
             reward_boost += 0.5
 
         r_sum = np.sum(sum_rate_arr, axis=0)
@@ -544,12 +572,17 @@ class UAV_LQDRL_Environment(gym.Env):
         reward += reward_boost * reward
         #if not (dist_to_centroid <= 30 and dist_to_centroid >= self.zmin):
         #    energy_cons_penalty += 0.2
+        if (uav.position[2] <= 0):
+            energy_cons_penalty += 0.95
         done = any(uav.energy <= 0 for uav in self.uavs)
         penalties = self.check_constraints()
         total_penalty = sum(v * p for v, p in zip(penalties.values(), [
             self.pwr_penalty, self.alt_penalty, self.range_penalty,
             self.min_rate_penalty, self.energy_penalty, self.velocity_penalty
         ]))
+        print("Reward Boost Factor: ", reward_boost)
+        print("Energy Consumption Penalty Factor: ", energy_cons_penalty)
+        print("Total Penalties Factor: ", total_penalty)
         reward -= reward * (total_penalty + energy_cons_penalty)
         print("Reward for step: ", reward)
         
@@ -579,7 +612,7 @@ class UAV_LQDRL_Environment(gym.Env):
             print(f"Sum Rate {k}: ", sum_rate)
             #if sum_rate / (self.f_carr / self.num_legit_users) > self.R_MIN / self.f_carr:
             if sum_rate > self.R_MIN:
-                #reward += energy_eff / self.num_legit_users
+                reward += energy_eff / self.num_legit_users
                 j += 1
                 if k == (self.num_legit_users - 1) and k == (j - 1):
                     grant_reward = True
@@ -589,6 +622,9 @@ class UAV_LQDRL_Environment(gym.Env):
         if grant_reward == True:
             reward = energy_eff
             print("All users above R_min")
+        else:
+            #reward -= (self.num_legit_users - j) * reward
+            print("Not all users above R_min")
 
         return reward
 
@@ -598,7 +634,9 @@ class UAV_LQDRL_Environment(gym.Env):
             "range": False,
             "altitude": False,
             "energy": False,
-            "velocity": False
+            "velocity": False,
+            "power": False,
+            "min_rate": False,
         }
 
         for uav in self.uavs:
