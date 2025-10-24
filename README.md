@@ -3,6 +3,8 @@ This repository contains the code and workings that I undertook as part of my ME
 
 The work outlined in this repository is the simulation of a Quantum Deep Reinforcement Learning (QDRL) algorithm for the optimisation of secret key rate exchange between a UAV base station (UAV-BS) and a set of legitimate, authenticated ground users that are subject to eavesdropping. 
 
+The thesis report for this project can be found at https://github.com/piersk/MEngSc_Thesis_Report.
+
 ### Joint Optimisation Problem 
 This problem has been modelled as a joint optimisation problem with a set of subproblems. 
 The objective of the joint optimisation problem is to maximise the secrecy rate of the UAV-LU communications, subject to a set of constraints.
